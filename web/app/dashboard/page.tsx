@@ -368,25 +368,21 @@ export default function Dashboard() {
         }));
         setRuns(newRuns);
         
-        // Auto-select new runs (running or recently completed)
-        const latestRun = newRuns[0]; // Runs are sorted by started_at desc
+        // Auto-select only for NEW running runs (live healing in progress)
         const runningRun = newRuns.find((r: HealingRun) => r.status === "running");
         
         if (runningRun && runningRun.id !== lastKnownRunId) {
-          // New running run detected - show it live
+          // New running run detected - auto-show it (live event)
           console.log("🚨 New healing run detected:", runningRun.id);
           setActiveRunId(runningRun.id);
           setLastKnownRunId(runningRun.id);
-        } else if (latestRun && latestRun.id !== lastKnownRunId && !activeRunId) {
-          // New completed run and nothing selected - auto-show it
-          console.log("📋 New run available:", latestRun.id);
-          setActiveRunId(latestRun.id);
-          setLastKnownRunId(latestRun.id);
-        } else if (isInitial && latestRun) {
-          // Initial load - select latest run
-          setActiveRunId(latestRun.id);
-          setLastKnownRunId(latestRun.id);
+        } else if (isInitial && newRuns[0]) {
+          // Initial load only - select latest run
+          setActiveRunId(newRuns[0].id);
+          setLastKnownRunId(newRuns[0].id);
         }
+        // NOTE: Don't auto-switch for completed runs during polling
+        // User's manual selection should be preserved
       }
     } catch (error) {
       console.error("Failed to fetch runs:", error);
