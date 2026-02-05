@@ -25,7 +25,6 @@ import {
   Dna,
 } from "lucide-react";
 
-// Event type colors and icons matching backend EventType enum
 const EVENT_CONFIG: Record<string, { bg: string; border: string; text: string; dot: string; icon: React.ElementType }> = {
   mission_start: { bg: "bg-blue-500/10", border: "border-blue-500/30", text: "text-blue-400", dot: "bg-blue-500", icon: Rocket },
   mission_end: { bg: "bg-purple-500/10", border: "border-purple-500/30", text: "text-purple-400", dot: "bg-purple-500", icon: Flag },
@@ -63,20 +62,17 @@ interface TimelineProps {
   onComplete?: (status: "success" | "failure") => void;
 }
 
-// Single timeline event card
 function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest: boolean }) {
   const config = EVENT_CONFIG[event.event_type] || DEFAULT_CONFIG;
   const [isExpanded, setIsExpanded] = useState(false);
   const Icon = config.icon;
-  
-  // Format timestamp
+
   const time = new Date(event.timestamp).toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
 
-  // Check if metadata should be shown
   const hasMetadata = Boolean(event.metadata && Object.keys(event.metadata).length > 0);
   const showExpandedMetadata = isExpanded && hasMetadata;
 
@@ -89,10 +85,8 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
       transition={{ duration: 0.3 }}
       className="relative pl-6 sm:pl-8"
     >
-      {/* Timeline connector line */}
       <div className="absolute left-[9px] sm:left-[11px] top-6 bottom-0 w-0.5 bg-gradient-to-b from-gray-700 to-transparent" />
-      
-      {/* Event dot with icon */}
+
       <motion.div
         className={`absolute left-0 top-2 w-5 h-5 sm:w-6 sm:h-6 rounded-full ${config.dot} flex items-center justify-center`}
         initial={{ scale: 0 }}
@@ -109,13 +103,11 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
         <Icon className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
       </motion.div>
 
-      {/* Event card */}
       <motion.div
         className={`${config.bg} ${config.border} border rounded-xl p-3 sm:p-4 mb-3 sm:mb-4 cursor-pointer hover:border-opacity-60 transition-all`}
         onClick={() => setIsExpanded(!isExpanded)}
         whileHover={{ scale: 1.01 }}
       >
-        {/* Header */}
         <div className="flex items-start justify-between gap-2 sm:gap-4">
           <div className="flex-1 min-w-0">
             <h3 className={`font-semibold text-sm sm:text-base ${config.text} truncate flex items-center gap-2`}>
@@ -129,7 +121,6 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
           <span className="text-gray-500 text-[10px] sm:text-xs font-mono whitespace-nowrap">{time}</span>
         </div>
 
-        {/* Expandable content for metadata */}
         {showExpandedMetadata ? (
           <div className="mt-3 pt-3 border-t border-gray-700/50">
             <pre className="text-xs text-gray-500 overflow-x-auto bg-gray-900/50 p-3 rounded-lg">
@@ -138,7 +129,6 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
           </div>
         ) : null}
 
-        {/* Code diff preview */}
         {event.event_type === "code_diff" && event.metadata ? (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
@@ -168,7 +158,6 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
           </motion.div>
         ) : null}
 
-        {/* PR link if available */}
         {event.metadata?.pr_url ? (
           <motion.a
             href={String(event.metadata.pr_url)}
@@ -186,7 +175,6 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
   );
 }
 
-// Loading pulse indicator
 function LoadingPulse() {
   return (
     <div className="relative pl-8">
@@ -207,7 +195,6 @@ function LoadingPulse() {
   );
 }
 
-// Main Timeline component
 export default function Timeline({ runId, apiBaseUrl = "", onComplete }: TimelineProps) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -217,30 +204,25 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
   const eventSourceRef = useRef<EventSource | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Reset state when runId changes
   useEffect(() => {
     setEvents([]);
     setIsConnected(false);
     setIsComplete(false);
     setError(null);
     setIsLoadingHistory(true);
-    
-    // Close existing SSE connection
+
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
   }, [runId]);
 
-  // Auto-scroll to latest event (only for live runs, not historical)
   useEffect(() => {
-    // Only auto-scroll if: container exists, we have events, AND the run is still in progress
     if (containerRef.current && events.length > 0 && !isComplete) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [events, isComplete]);
 
-  // Fetch event history first (for completed runs or late-joining)
   useEffect(() => {
     if (!runId) return;
 
@@ -261,7 +243,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
           if (historyEvents.length > 0) {
             setEvents(historyEvents);
             
-            // Check if run is already complete
             const hasCompleted = historyEvents.some(
               (e: TimelineEvent) => e.event_type === "success" || e.event_type === "failure" || e.event_type === "mission_end"
             );
@@ -285,7 +266,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
     fetchHistory();
   }, [runId, apiBaseUrl, onComplete]);
 
-  // Connect to SSE stream for live updates (only if not complete)
   useEffect(() => {
     if (!runId || isComplete || isLoadingHistory) return;
 
@@ -305,29 +285,23 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
       setError("Connection lost. Retrying...");
       setIsConnected(false);
     };
-
-    // Track seen timestamps to avoid duplicates from history
     const seenTimestamps = new Set<string>();
 
-    // Listen for all event types
     const eventTypes = Object.keys(EVENT_CONFIG);
     eventTypes.forEach((eventType) => {
       eventSource.addEventListener(eventType, (e) => {
         try {
           const data = JSON.parse(e.data) as TimelineEvent;
           
-          // Skip if we already have this event from history
           if (seenTimestamps.has(data.timestamp)) return;
           seenTimestamps.add(data.timestamp);
           
           setEvents((prev) => {
-            // Double-check for duplicates
             if (prev.some(p => p.timestamp === data.timestamp)) return prev;
             console.log(`[TALOS Timeline] New event: ${eventType} - ${data.title}`);
             return [...prev, data];
           });
 
-          // Check for completion
           if (eventType === "mission_end" || eventType === "success" || eventType === "failure") {
             setIsComplete(true);
             onComplete?.(eventType === "success" ? "success" : "failure");
@@ -339,12 +313,10 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
       });
     });
 
-    // Connected event
     eventSource.addEventListener("connected", () => {
       setIsConnected(true);
     });
 
-    // Complete event (for already-finished runs)
     eventSource.addEventListener("complete", () => {
       setIsComplete(true);
       eventSource.close();
@@ -353,15 +325,11 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
     return () => {
       eventSource.close();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, apiBaseUrl, isComplete, isLoadingHistory]);
 
-  // Polling fallback: if SSE fails, poll for history updates
   useEffect(() => {
-    // Only poll if not connected and not complete
     if (isConnected || isComplete || isLoadingHistory || !runId) return;
 
-    // Wait a bit before starting polling (give SSE a chance)
     const pollDelay = setTimeout(() => {
       const pollInterval = setInterval(async () => {
         try {
@@ -376,7 +344,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
             if (historyEvents.length > events.length) {
               setEvents(historyEvents);
               
-              // Check if run is already complete
               const hasCompleted = historyEvents.some(
                 (e: TimelineEvent) => e.event_type === "success" || e.event_type === "failure" || e.event_type === "mission_end"
               );
@@ -391,13 +358,12 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
         } catch (err) {
           console.error("Polling failed:", err);
         }
-      }, 2000); // Poll every 2 seconds
+      }, 2000); 
 
       return () => clearInterval(pollInterval);
-    }, 3000); // Wait 3 seconds before starting poll
+    }, 3000); 
 
     return () => clearTimeout(pollDelay);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, apiBaseUrl, isConnected, isComplete, isLoadingHistory]);
 
   if (!runId) {
@@ -410,7 +376,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6 px-4">
         <div className="flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${isConnected ? "bg-emerald-500" : "bg-amber-500"} animate-pulse`} />
@@ -424,7 +389,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
         </div>
       </div>
 
-      {/* Error banner */}
       <AnimatePresence>
         {error && (
           <motion.div
@@ -439,7 +403,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
         )}
       </AnimatePresence>
 
-      {/* Timeline events */}
       <div
         ref={containerRef}
         className="flex-1 overflow-y-auto px-4 pb-4 scroll-smooth"
@@ -455,10 +418,8 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
           ))}
         </AnimatePresence>
 
-        {/* Loading indicator */}
         {isConnected && !isComplete && events.length > 0 && <LoadingPulse />}
 
-        {/* Loading history state */}
         {isLoadingHistory && events.length === 0 && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -472,7 +433,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
           </motion.div>
         )}
 
-        {/* Empty state - waiting for events */}
         {events.length === 0 && !isLoadingHistory && isConnected && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -491,7 +451,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
           </motion.div>
         )}
 
-        {/* No events available (history expired) */}
         {events.length === 0 && !isLoadingHistory && !isConnected && !isComplete && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -506,7 +465,6 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
           </motion.div>
         )}
 
-        {/* Completion status */}
         {isComplete && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}

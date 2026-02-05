@@ -1,9 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone', // For Docker deployment
+  output: 'standalone',
   experimental: {
-    // Enable React 19 features
   },
   async headers() {
     return [

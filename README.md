@@ -1,4 +1,4 @@
-# 🧬 TALOS — The Self-Healing DevOps Species
+# TALOS — The Self-Healing DevOps Species
 
 <div align="center">
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 📖 Table of Contents
+## Table of Contents
 
 - [The Problem](#-the-problem)
 - [The Solution](#-the-solution)
@@ -35,7 +35,7 @@
 
 ---
 
-## 🎯 The Problem
+## The Problem
 
 Every developer knows the pain: you push code, grab a coffee, and return to a **red CI badge**. The error log is cryptic. The stack trace points to a file you didn't touch. You spend 30 minutes deciphering what went wrong.
 
@@ -45,52 +45,52 @@ Every developer knows the pain: you push code, grab a coffee, and return to a **
 
 | Impact | Reality |
 |--------|---------|
-| ⏱️ **Developer Time** | Average 23 minutes per failed build investigation |
-| 💸 **Lost Productivity** | $100K+ annually for mid-size teams |
-| 😤 **Context Switching** | Breaks flow state, delays feature delivery |
-| 🔄 **Repeated Failures** | Same error patterns occur across projects |
+| **Developer Time** | Average 23 minutes per failed build investigation |
+| **Lost Productivity** | $100K+ annually for mid-size teams |
+| **Context Switching** | Breaks flow state, delays feature delivery |
+| **Repeated Failures** | Same error patterns occur across projects |
 
 ---
 
-## 💡 The Solution
+## The Solution
 
 **TALOS** (The Autonomous Lifecycle Operations System) is not a pipeline. It's a **digital organism** that:
 
-1. **🔭 Observes** — Watches your GitHub repos via webhooks for build failures
-2. **🧠 Reasons** — Uses Gemini 3 to analyze logs, build dependency graphs, and identify the *root cause*
-3. **🔧 Heals** — Generates fixes in an isolated sandbox, verifies them, and opens a Pull Request
-4. **👁️ Shows** — Streams its "thought process" to a real-time dashboard, so you see exactly what it's doing
+1. **Observes** — Watches your GitHub repos via webhooks for build failures
+2. **Reasons** — Uses Gemini 3 to analyze logs, build dependency graphs, and identify the *root cause*
+3. **Heals** — Generates fixes in an isolated sandbox, verifies them, and opens a Pull Request
+4. **Shows** — Streams its "thought process" to a real-time dashboard, so you see exactly what it's doing
 
 > *"TALOS doesn't just tell you what's broken—it fixes it for you."*
 
 ### Before TALOS
 ```
-❌ Build Failed → Read Logs → Debug → Fix → Push → Wait → Hope
+Build Failed → Read Logs → Debug → Fix → Push → Wait → Hope
 ```
 
 ### After TALOS
 ```
-✅ Build Failed → TALOS Fixes It → Review PR → Merge
+Build Failed → TALOS Fixes It → Review PR → Merge
 ```
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 | Feature | Description |
 |---------|-------------|
-| **🎯 Patient Zero Detection** | Distinguishes between where the error *manifests* vs. where the bug *originates* using dependency graph analysis |
-| **🔄 Verification Loop** | Tests fixes in isolated E2B Firecracker microVMs before proposing them |
-| **📡 Real-Time Neural Dashboard** | Watch the agent think and act via Server-Sent Events (SSE) streaming |
-| **🤖 Multi-Attempt Reasoning** | If a fix fails verification, TALOS learns from the error and tries again (up to 3 attempts) |
-| **🔐 Zero-Config Security** | GitHub App model with fine-grained permissions, HMAC webhook verification |
-| **🌐 Polyglot Support** | Node.js, Python, TypeScript, Rust—auto-detected, no setup needed |
-| **🚫 Duplicate PR Prevention** | Automatically detects existing TALOS PRs to avoid spam |
-| **↩️ Allow Retry** | Dashboard button to bypass duplicate detection when you want a fresh fix attempt |
+| **Patient Zero Detection** | Distinguishes between where the error *manifests* vs. where the bug *originates* using dependency graph analysis |
+| **Verification Loop** | Tests fixes in isolated E2B Firecracker microVMs before proposing them |
+| **Real-Time Neural Dashboard** | Watch the agent think and act via Server-Sent Events (SSE) streaming |
+| **Multi-Attempt Reasoning** | If a fix fails verification, TALOS learns from the error and tries again (up to 3 attempts) |
+| **Zero-Config Security** | GitHub App model with fine-grained permissions, HMAC webhook verification |
+| **Polyglot Support** | Node.js, Python, TypeScript, Rust—auto-detected, no setup needed |
+| **Duplicate PR Prevention** | Automatically detects existing TALOS PRs to avoid spam |
+| **Allow Retry** | Dashboard button to bypass duplicate detection when you want a fresh fix attempt |
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -133,7 +133,7 @@ Every developer knows the pain: you push code, grab a coffee, and return to a **
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 🧬 The OODA Loop
+### The OODA Loop
 
 TALOS implements the **OODA (Observe-Orient-Decide-Act)** cognitive loop, a decision-making framework used by fighter pilots:
 
@@ -144,7 +144,7 @@ TALOS implements the **OODA (Observe-Orient-Decide-Act)** cognitive loop, a deci
 | **Decide** | Gemini 3 + ReAct | Reasons about root cause, generates targeted fix |
 | **Act** | E2B Sandbox | Applies fix, runs verification, creates PR |
 
-### 🔄 The Healing Pipeline
+### The Healing Pipeline
 
 ```
 ┌──────────┐   ┌─────────┐   ┌──────────┐   ┌─────────┐   ┌────────┐   ┌──────────┐
@@ -157,7 +157,7 @@ TALOS implements the **OODA (Observe-Orient-Decide-Act)** cognitive loop, a deci
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -233,11 +233,11 @@ Update your GitHub App webhook URL to the tunnel URL.
 ### 6. Trigger a Failure
 
 Push a bug to a watched repo. TALOS will:
-1. ✅ Detect the failure via webhook
-2. ✅ Clone the repo into an isolated sandbox
-3. ✅ Analyze the error with Gemini 3
-4. ✅ Generate and verify a fix
-5. ✅ Open a Pull Request
+1. Detect the failure via webhook
+2. Clone the repo into an isolated sandbox
+3. Analyze the error with Gemini 3
+4. Generate and verify a fix
+5. Open a Pull Request
 
 ---
 
@@ -300,7 +300,7 @@ NEXT_PUBLIC_GITHUB_APP_URL=https://github.com/apps/your-app-name
 
 ---
 
-## 📡 API Reference
+## API Reference
 
 ### Core Endpoints
 
@@ -344,16 +344,16 @@ NEXT_PUBLIC_GITHUB_APP_URL=https://github.com/apps/your-app-name
 
 ---
 
-## 🧠 The Cognitive Core
+## The Cognitive Core
 
 ### Dual-Model Architecture
 
-TALOS uses two Gemini models for different cognitive tasks:
+TALOS uses Gemini 3 model for different cognitive tasks:
 
 | Model | Role | Use Case |
 |-------|------|----------|
 | **Gemini 3 Flash** | Fast Responder | Log analysis, quick fixes, syntax errors |
-| **Gemini 2.5 Pro** | Deep Thinker | Complex logic bugs, multi-file fixes |
+| **Gemini 3 FLASH** | Deep Thinker | Complex logic bugs, multi-file fixes |
 
 ### Error Classification
 
@@ -416,7 +416,7 @@ npm WARN deprecated...             (stripped)
 
 ---
 
-## 🛡️ Security
+## Security
 
 TALOS is designed with security-first principles:
 
@@ -440,7 +440,7 @@ TALOS is designed with security-first principles:
 
 ---
 
-## 🎨 Neural Dashboard
+## Neural Dashboard
 
 The real-time dashboard streams TALOS's thought process:
 
@@ -459,16 +459,16 @@ The real-time dashboard streams TALOS's thought process:
 
 ### Dashboard Features
 
-- **📊 Stats Overview**: Protected repos, success rate, total heals
-- **📋 Run History**: Click any past run to replay its timeline
-- **🔴 Live Indicator**: Pulses when a run is in progress
-- **🔄 Auto-Scroll**: Follows live runs, pauses for historical viewing
-- **📝 Expandable Events**: Click to see metadata and code diffs
-- **↩️ Allow Retry Button**: Request a new fix attempt
+- **Stats Overview**: Protected repos, success rate, total heals
+- **Run History**: Click any past run to replay its timeline
+- **Live Indicator**: Pulses when a run is in progress
+- **Auto-Scroll**: Follows live runs, pauses for historical viewing
+- **Expandable Events**: Click to see metadata and code diffs
+- **↩Allow Retry Button**: Request a new fix attempt
 
 ---
 
-## 🐳 Deployment
+## Deployment
 
 ### Docker Compose (Recommended)
 
@@ -515,7 +515,7 @@ Run the schema in your Supabase SQL Editor:
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Backend
 | Technology | Purpose |
@@ -530,8 +530,7 @@ Run the schema in your Supabase SQL Editor:
 ### AI/ML
 | Technology | Purpose |
 |------------|---------|
-| **Gemini 3 Flash** | Fast reasoning, log analysis |
-| **Gemini 2.5 Pro** | Deep reasoning, complex fixes |
+| **Gemini 3 Flash** | Fast reasoning, log analysis,Deep reasoning, complex fixes |
 | **E2B** | Firecracker microVM sandboxes |
 | **Repomix** | Codebase context assembly |
 
@@ -553,7 +552,7 @@ Run the schema in your Supabase SQL Editor:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Here's how to get started:
 
@@ -580,10 +579,6 @@ cd web && npm test
 
 ---
 
-## 📊 Hackathon Submission
-
-### Why TALOS Wins
-
 | Criteria | How TALOS Excels |
 |----------|------------------|
 | **The Code** | Clean monorepo architecture, strict typing, modular design |
@@ -603,18 +598,10 @@ cd web && npm test
 | Manual intervention | **Autonomous** |
 | Black box | **Transparent** (Neural Dashboard) |
 
----
-
-## 📄 License
-
-MIT License - Built with ❤️ for the Vetrox Agentic 3.0 Hackathon
-
----
-
 <div align="center">
 
-### 🧬 TALOS — Because your CI/CD pipeline should heal itself.
+### TALOS — Because your CI/CD pipeline should heal itself.
 
-**[Install Now](https://github.com/apps/talos-healer)** • **[View Demo](#-neural-dashboard)** • **[Star ⭐ This Repo](https://github.com/timix648/TALOS)**
+**[Install Now](https://github.com/apps/talos-healer)** • **[View Demo](#-neural-dashboard)** • **[Star This Repo](https://github.com/timix648/TALOS)**
 
 </div>

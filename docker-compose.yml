@@ -1,9 +1,6 @@
 version: "3.9"
 
 services:
-  # ============================================
-  # REDIS - Event Bus & Caching
-  # ============================================
   redis:
     image: redis:7-alpine
     container_name: talos-redis
@@ -18,9 +15,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ============================================
-  # API - The Nervous System (FastAPI)
-  # ============================================
   api:
     build:
       context: ./api
@@ -33,12 +27,10 @@ services:
       - REDIS_URL=redis://redis:6379
       - HOST=0.0.0.0
       - PORT=8000
-      # 🟢 CRITICAL FIX: Override Windows .env path with Linux container path
       - GITHUB_PRIVATE_KEY_PATH=/app/talos-private-key.pem
     env_file:
       - ./api/.env
     volumes:
-      # Mount the private key to the path defined above
       - ./api/talos-private-key.pem:/app/talos-private-key.pem:ro
     depends_on:
       redis:
@@ -49,9 +41,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ============================================
-  # WEB - The Face (Next.js Dashboard)
-  # ============================================
   web:
     build:
       context: ./web
@@ -71,24 +60,6 @@ services:
       - ./web/.env.local
     depends_on:
       - api
-
-  # ============================================
-  # NGROK (Optional) - Expose for GitHub Webhooks
-  # ============================================
-  # ngrok:
-  #   image: ngrok/ngrok:latest
-  #   container_name: talos-ngrok
-  #   restart: unless-stopped
-  #   command:
-  #     - "http"
-  #     - "api:8000"
-  #     - "--log=stdout"
-  #   environment:
-  #     - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-  #   ports:
-  #     - "4040:4040"
-  #   depends_on:
-  #     - api
 
 volumes:
   redis_data:

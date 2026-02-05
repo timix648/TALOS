@@ -19,7 +19,6 @@ export default function InstallButton({
 
   const handleClick = () => {
     setIsLoading(true);
-    // Redirect to GitHub App installation
     window.location.href = githubAppUrl;
   };
 
@@ -50,7 +49,6 @@ export default function InstallButton({
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
     >
-      {/* Shine effect */}
       {variant === "primary" && (
         <motion.div
           className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
@@ -60,7 +58,6 @@ export default function InstallButton({
         />
       )}
 
-      {/* Content */}
       <span className="relative flex items-center justify-center gap-2">
         {isLoading ? (
           <>
@@ -79,7 +76,6 @@ export default function InstallButton({
         )}
       </span>
 
-      {/* Glow effect */}
       {variant === "primary" && isHovered && (
         <motion.div
           className="absolute -inset-1 bg-gradient-to-r from-cyan-500/50 to-purple-600/50 rounded-xl blur-lg -z-10"
@@ -92,7 +88,6 @@ export default function InstallButton({
   );
 }
 
-// Compact version for nav
 export function InstallButtonCompact({ 
   githubAppUrl = "https://github.com/apps/talos-healer/installations/new" 
 }) {

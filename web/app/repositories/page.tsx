@@ -36,7 +36,6 @@ export default function RepositoriesPage() {
 
   const GITHUB_APP_URL = process.env.NEXT_PUBLIC_GITHUB_APP_URL || "https://github.com/apps/talos-healer/installations/new";
 
-  // Fetch session
   useEffect(() => {
     const fetchSession = async () => {
       try {
@@ -54,7 +53,6 @@ export default function RepositoriesPage() {
     fetchSession();
   }, []);
 
-  // Fetch repos when we have installation_id
   useEffect(() => {
     const fetchRepos = async () => {
       if (!session?.installation_id) {
@@ -232,7 +230,7 @@ export default function RepositoriesPage() {
             href="/dashboard"
             className="inline-flex items-center gap-2 px-4 py-2 border border-gray-700 rounded-lg hover:bg-gray-800 transition-all"
           >
-            📊 Dashboard
+            Dashboard
           </Link>
         </div>
 
@@ -260,7 +258,7 @@ export default function RepositoriesPage() {
                     : "bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-600"
                 }`}
               >
-                {f === "all" ? "All" : f === "watched" ? "🛡️ Watching" : "⏸️ Not Watching"}
+                {f === "all" ? "All" : f === "watched" ? "Watching" : "⏸Not Watching"}
               </button>
             ))}
           </div>
@@ -308,7 +306,7 @@ export default function RepositoriesPage() {
                         </a>
                         {repo.watched && (
                           <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full border border-cyan-500/30">
-                            🛡️ Protected
+                          Protected
                           </span>
                         )}
                       </div>
@@ -318,7 +316,7 @@ export default function RepositoriesPage() {
                       <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                         <span>📌 {repo.default_branch}</span>
                         {repo.watched && repo.safe_mode && (
-                          <span className="text-green-400">✅ Safe Mode (PR only)</span>
+                          <span className="text-green-400">Safe Mode</span>
                         )}
                       </div>
                     </div>
@@ -343,7 +341,7 @@ export default function RepositoriesPage() {
                       ) : repo.watched ? (
                         "Stop Watching"
                       ) : (
-                        "🛡️ Enable TALOS"
+                        "Enable TALOS"
                       )}
                     </button>
                   </div>
