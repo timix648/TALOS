@@ -36,9 +36,26 @@ async def get_stats():
         # Calculate fix rate
         fix_rate = round((success_count / total_count * 100) if total_count > 0 else 0, 1)
         
-        # Default boot time (E2B sandbox typically boots in ~150ms)
-        # We could track this in healing_runs metadata in the future
-        avg_boot_time = 150
+        # Get average boot time from healing_events (sandbox_ready events)
+        # The metadata JSONB column may contain boot_time_ms
+        avg_boot_time = 150  # Default
+        try:
+            boot_events = supabase.table("healing_events")\
+                .select("metadata")\
+                .eq("event_type", "sandbox_ready")\
+                .limit(100)\
+                .execute()
+            
+            boot_times = []
+            for event in (boot_events.data or []):
+                meta = event.get("metadata", {})
+                if isinstance(meta, dict) and "boot_time_ms" in meta:
+                    boot_times.append(meta["boot_time_ms"])
+            
+            if boot_times:
+                avg_boot_time = round(sum(boot_times) / len(boot_times))
+        except Exception:
+            pass  # Use default if healing_events table doesn't exist yet
         
         return {
             "avg_boot_time_ms": avg_boot_time,
