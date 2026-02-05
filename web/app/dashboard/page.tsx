@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   Shield,
@@ -297,7 +297,6 @@ export default function Dashboard() {
   const [runs, setRuns] = useState<HealingRun[]>([]);
   const [watchedRepos, setWatchedRepos] = useState<WatchedRepo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [lastKnownRunId, setLastKnownRunId] = useState<string | null>(null);
   const [retryAllowed, setRetryAllowed] = useState<string | null>(null); // repo that can retry
   const [stats, setStats] = useState({
     total_heals: 0,
@@ -305,6 +304,9 @@ export default function Dashboard() {
     fix_rate_percent: 0,
     avg_boot_time_ms: 0,
   });
+  
+  // Use refs to avoid stale closures in polling
+  const lastKnownRunIdRef = useRef<string | null>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -371,15 +373,15 @@ export default function Dashboard() {
         // Auto-select only for NEW running runs (live healing in progress)
         const runningRun = newRuns.find((r: HealingRun) => r.status === "running");
         
-        if (runningRun && runningRun.id !== lastKnownRunId) {
+        if (runningRun && runningRun.id !== lastKnownRunIdRef.current) {
           // New running run detected - auto-show it (live event)
           console.log("🚨 New healing run detected:", runningRun.id);
           setActiveRunId(runningRun.id);
-          setLastKnownRunId(runningRun.id);
+          lastKnownRunIdRef.current = runningRun.id;
         } else if (isInitial && newRuns[0]) {
           // Initial load only - select latest run
           setActiveRunId(newRuns[0].id);
-          setLastKnownRunId(newRuns[0].id);
+          lastKnownRunIdRef.current = newRuns[0].id;
         }
         // NOTE: Don't auto-switch for completed runs during polling
         // User's manual selection should be preserved
@@ -442,7 +444,7 @@ export default function Dashboard() {
 
     return () => clearInterval(pollInterval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastKnownRunId]);
+  }, []); // No dependencies - runs once on mount, uses refs for current values
 
   // Handle completion
   const handleComplete = (status: "success" | "failure") => {
