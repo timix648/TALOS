@@ -311,7 +311,7 @@ export default function Dashboard() {
   // Fetch stats from backend
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/stats`);
+      const res = await fetch(`${API_URL}/stats/`);
       if (res.ok) {
         const data = await res.json();
         setStats({
