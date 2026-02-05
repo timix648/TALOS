@@ -1,0 +1,71 @@
+# ============================================
+# TALOS GitHub App Manifest
+# ============================================
+# This manifest defines the GitHub App configuration.
+# Use this for the App Manifest Flow to auto-create the app.
+# 
+# Setup:
+# 1. Replace YOUR_DOMAIN with your actual domain
+# 2. POST this manifest to: https://github.com/settings/apps/new
+# 3. Save the returned credentials (App ID, Private Key, etc.)
+# ============================================
+
+name: TALOS-Healer
+description: "🧬 Self-Healing DevOps Agent - Autonomous CI/CD repair powered by Gemini 3"
+url: https://YOUR_DOMAIN.com
+
+# Webhook configuration
+hook_attributes:
+  url: https://YOUR_DOMAIN.com/webhook
+  active: true
+
+# OAuth callback for frontend auth
+redirect_url: https://YOUR_DOMAIN.com/api/auth/callback/github
+callback_urls:
+  - https://YOUR_DOMAIN.com/api/auth/callback/github
+  - http://localhost:3000/api/auth/callback/github
+
+# Make app publicly installable
+public: true
+
+# ===========================================
+# PERMISSIONS (Principle of Least Privilege)
+# ===========================================
+default_permissions:
+  # Essential: Read code and push fixes
+  contents: write
+  
+  # Essential: Open PRs for human review  
+  pull_requests: write
+  
+  # Essential: Report "Healing in Progress" status
+  checks: write
+  
+  # Mandatory for all GitHub Apps
+  metadata: read
+  
+  # Optional: Restart failed workflows
+  workflows: write
+  
+  # Optional: Comment on related issues
+  issues: write
+  
+  # Optional: Read workflow logs for debugging
+  actions: read
+
+# ===========================================
+# WEBHOOK EVENTS (The Nervous System)
+# ===========================================
+default_events:
+  # PRIMARY TRIGGER: Listen for build failures
+  - workflow_run
+  
+  # Monitor PR activity
+  - pull_request
+  
+  # Monitor external status checks (SonarQube, etc.)
+  - check_run
+  
+  # Get notified of new installations
+  - installation
+  - installation_repositories

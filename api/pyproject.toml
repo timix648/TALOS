@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "talos-api"
+version = "0.1.0"
+description = "The cognitive nervous system for the Talos Self-Healing Agent"
+authors = ["Samuel <timix648@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.128.0"
+uvicorn = {extras = ["standard"], version = "^0.40.0"}
+pydantic = "^2.12.5"
+pydantic-settings = "^2.1.0"
+google-genai = "^1.60.0"        # The NEW Unified SDK for Gemini 3
+supabase = "^2.27.2"
+e2b = "^2.12.1"                 # E2B Sandbox SDK
+python-dotenv = "^1.0.0"
+httpx = "^0.28.1"
+cryptography = "^43.0.0"        # Standard crypto library
+redis = "^5.2.0"
+pyjwt = "^2.8.0"                # For GitHub App JWT auth
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
