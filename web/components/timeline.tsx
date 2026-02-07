@@ -23,6 +23,8 @@ import {
   Loader2,
   Link as LinkIcon,
   Dna,
+  Camera,
+  Eye,
 } from "lucide-react";
 
 const EVENT_CONFIG: Record<string, { bg: string; border: string; text: string; dot: string; icon: React.ElementType }> = {
@@ -43,6 +45,8 @@ const EVENT_CONFIG: Record<string, { bg: string; border: string; text: string; d
   code_diff: { bg: "bg-pink-500/10", border: "border-pink-500/30", text: "text-pink-400", dot: "bg-pink-500", icon: FileDiff },
   error_log: { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-400", dot: "bg-red-500", icon: AlertCircle },
   thought_stream: { bg: "bg-purple-500/10", border: "border-purple-500/30", text: "text-purple-400", dot: "bg-purple-500", icon: Sparkles },
+  screenshot: { bg: "bg-indigo-500/10", border: "border-indigo-500/30", text: "text-indigo-400", dot: "bg-indigo-500", icon: Camera },
+  visual_analysis: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-400", dot: "bg-violet-500", icon: Eye },
 };
 
 const DEFAULT_CONFIG = { bg: "bg-gray-500/10", border: "border-gray-500/30", text: "text-gray-400", dot: "bg-gray-500", icon: Dna };
@@ -158,6 +162,86 @@ function TimelineEventCard({ event, isLatest }: { event: TimelineEvent; isLatest
           </motion.div>
         ) : null}
 
+        {event.event_type === "screenshot" && event.metadata?.screenshot_base64 ? (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            className="mt-3 pt-3 border-t border-gray-700/50"
+          >
+            <div className="relative rounded-lg overflow-hidden border border-indigo-500/30 bg-indigo-500/5">
+              <div className="absolute top-2 left-2 bg-indigo-500/80 text-white text-xs px-2 py-1 rounded flex items-center gap-1 z-10">
+                <Camera className="w-3 h-3" />
+                Visual Capture
+              </div>
+              <img
+                src={`data:image/png;base64,${event.metadata.screenshot_base64}`}
+                alt="Screenshot"
+                className="w-full h-auto rounded-lg"
+              />
+            </div>
+          </motion.div>
+        ) : null}
+
+        {event.event_type === "visual_analysis" && event.metadata ? (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            className="mt-3 pt-3 border-t border-gray-700/50"
+          >
+            <div className="space-y-3">
+              <div className="bg-violet-500/10 p-3 rounded-lg border border-violet-500/20">
+                <div className="text-violet-400 text-xs font-semibold mb-1 flex items-center gap-1">
+                  <Eye className="w-3 h-3" />
+                  Gemini Vision Analysis
+                </div>
+                <p className="text-violet-300/80 text-sm">
+                  {String(event.metadata.screenshot_description || 'No description available')}
+                </p>
+              </div>
+
+             
+              {Array.isArray(event.metadata.issues) && event.metadata.issues.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="text-red-400 text-xs font-semibold flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    Visual Issues Detected ({event.metadata.issues.length})
+                  </div>
+                  {(event.metadata.issues as Array<{type?: string; problem?: string; severity?: string; element?: string}>).map((issue, idx) => (
+                    <div key={idx} className="bg-red-500/10 p-2 rounded-lg border border-red-500/20 text-xs">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                          issue.severity === 'high' ? 'bg-red-500 text-white' :
+                          issue.severity === 'medium' ? 'bg-yellow-500 text-black' :
+                          'bg-gray-500 text-white'
+                        }`}>
+                          {issue.severity || 'unknown'}
+                        </span>
+                        <span className="text-red-400 font-medium">{issue.type || 'unknown'}</span>
+                      </div>
+                      <p className="text-red-300/70">{issue.problem}</p>
+                      {issue.element ? (
+                        <p className="text-gray-500 mt-1">Element: {issue.element}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : event.metadata.has_issues === false ? (
+                <div className="bg-green-500/10 p-2 rounded-lg border border-green-500/20 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+                  <span className="text-green-400">No visual issues detected!</span>
+                </div>
+              ) : null}
+
+              
+              {typeof event.metadata.confidence === 'number' ? (
+                <div className="text-gray-500 text-xs">
+                  Confidence: {Math.round(Number(event.metadata.confidence) * 100)}%
+                </div>
+              ) : null}
+            </div>
+          </motion.div>
+        ) : null}
+
         {event.metadata?.pr_url ? (
           <motion.a
             href={String(event.metadata.pr_url)}
@@ -205,6 +289,7 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    console.log(`[TALOS Timeline] Run ID changed to: ${runId}, resetting state...`);
     setEvents([]);
     setIsConnected(false);
     setIsComplete(false);
@@ -212,9 +297,17 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
     setIsLoadingHistory(true);
 
     if (eventSourceRef.current) {
+      console.log(`[TALOS Timeline] Closing old SSE connection`);
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+  }, [runId]);
+
+
+  const currentRunIdRef = useRef<string>(runId);
+  
+  useEffect(() => {
+    currentRunIdRef.current = runId;
   }, [runId]);
 
   useEffect(() => {
@@ -228,14 +321,21 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
 
     const fetchHistory = async () => {
       setIsLoadingHistory(true);
-      console.log(`[TALOS Timeline] Fetching history for run: ${runId}`);
+      const fetchingRunId = runId; 
+      console.log(`[TALOS Timeline] Fetching history for run: ${fetchingRunId}`);
       try {
-        const res = await fetch(`${apiBaseUrl}/events/history/${runId}`);
+        const res = await fetch(`${apiBaseUrl}/events/history/${fetchingRunId}`);
+        
+        if (currentRunIdRef.current !== fetchingRunId) {
+          console.log(`[TALOS Timeline] Discarding stale history for ${fetchingRunId}, current is ${currentRunIdRef.current}`);
+          return;
+        }
+        
         if (res.ok) {
           const data = await res.json();
           const historyEvents = (data.events || []).map((e: TimelineEvent & { run_id?: string }) => ({
             ...e,
-            run_id: runId,
+            run_id: fetchingRunId,
           }));
           
           console.log(`[TALOS Timeline] Loaded ${historyEvents.length} events from history`);
@@ -259,7 +359,10 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
       } catch (err) {
         console.error("[TALOS Timeline] Failed to fetch history:", err);
       } finally {
-        setIsLoadingHistory(false);
+      
+        if (currentRunIdRef.current === fetchingRunId) {
+          setIsLoadingHistory(false);
+        }
       }
     };
 
@@ -327,21 +430,43 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
     };
   }, [runId, apiBaseUrl, isComplete, isLoadingHistory]);
 
+  const eventsLengthRef = useRef(0);
+  useEffect(() => {
+    eventsLengthRef.current = events.length;
+  }, [events.length]);
+
   useEffect(() => {
     if (isConnected || isComplete || isLoadingHistory || !runId) return;
 
+    const pollingRunId = runId; 
+    
     const pollDelay = setTimeout(() => {
       const pollInterval = setInterval(async () => {
+    
+        if (currentRunIdRef.current !== pollingRunId) {
+          console.log(`[TALOS Timeline] Stopping stale polling for ${pollingRunId}`);
+          clearInterval(pollInterval);
+          return;
+        }
+        
         try {
-          const res = await fetch(`${apiBaseUrl}/events/history/${runId}`);
+          const res = await fetch(`${apiBaseUrl}/events/history/${pollingRunId}`);
+          
+        
+          if (currentRunIdRef.current !== pollingRunId) {
+            clearInterval(pollInterval);
+            return;
+          }
+          
           if (res.ok) {
             const data = await res.json();
             const historyEvents = (data.events || []).map((e: TimelineEvent & { run_id?: string }) => ({
               ...e,
-              run_id: runId,
+              run_id: pollingRunId,
             }));
             
-            if (historyEvents.length > events.length) {
+           
+            if (historyEvents.length > eventsLengthRef.current) {
               setEvents(historyEvents);
               
               const hasCompleted = historyEvents.some(
@@ -358,13 +483,13 @@ export default function Timeline({ runId, apiBaseUrl = "", onComplete }: Timelin
         } catch (err) {
           console.error("Polling failed:", err);
         }
-      }, 2000); 
+      }, 3000);
 
       return () => clearInterval(pollInterval);
-    }, 3000); 
+    }, 5000); 
 
     return () => clearTimeout(pollDelay);
-  }, [runId, apiBaseUrl, isConnected, isComplete, isLoadingHistory]);
+  }, [runId, apiBaseUrl, isConnected, isComplete, isLoadingHistory, onComplete]);
 
   if (!runId) {
     return (

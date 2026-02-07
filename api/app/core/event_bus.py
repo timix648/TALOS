@@ -25,36 +25,37 @@ load_dotenv()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
-# Event Types - Color coded for the Neural Dashboard
 class EventType(str, Enum):
-    # Lifecycle
-    MISSION_START = "mission_start"      # 🚀 Blue
-    MISSION_END = "mission_end"          # 🏁 Purple
+  
+    MISSION_START = "mission_start"      
+    MISSION_END = "mission_end"         
     
-    # Perception (Yellow)
-    CLONING = "cloning"                  # 📦 
-    SCOUTING = "scouting"                # 🔭
-    READING_CODE = "reading_code"        # 👁️
+    CLONING = "cloning"                 
+    SCOUTING = "scouting"               
+    READING_CODE = "reading_code"        
     
-    # Cognition (Cyan)
-    THINKING = "thinking"                # 🧠
-    ANALYZING = "analyzing"              # 🔬
-    DIAGNOSING = "diagnosing"            # 💡
     
-    # Action (Green)
-    APPLYING_FIX = "applying_fix"        # 🔧
-    VERIFYING = "verifying"              # 🧪
-    CREATING_PR = "creating_pr"          # 🔀
+    THINKING = "thinking"                
+    ANALYZING = "analyzing"             
+    DIAGNOSING = "diagnosing"           
     
-    # Results
-    SUCCESS = "success"                  # ✅ Green
-    FAILURE = "failure"                  # ❌ Red
-    RETRY = "retry"                      # 🔄 Orange
+    APPLYING_FIX = "applying_fix"      
+    VERIFYING = "verifying"             
+    CREATING_PR = "creating_pr"         
     
-    # Data payloads
-    CODE_DIFF = "code_diff"              # 📝 For showing proposed changes
-    ERROR_LOG = "error_log"              # 📋 Cleaned error display
-    THOUGHT_STREAM = "thought_stream"    # 💭 Gemini's chain of thought
+    
+    SUCCESS = "success"                 
+    FAILURE = "failure"                 
+    RETRY = "retry"                     
+    
+    
+    CODE_DIFF = "code_diff"             
+    ERROR_LOG = "error_log"            
+    THOUGHT_STREAM = "thought_stream"   
+    
+  
+    SCREENSHOT = "screenshot"          
+    VISUAL_ANALYSIS = "visual_analysis"  
 
 
 @dataclass
@@ -113,9 +114,9 @@ class EventBus:
                 self._redis = redis.from_url(REDIS_URL, decode_responses=True)
                 # Test connection
                 await self._redis.ping()
-                print(f"✅ Redis connected: {REDIS_URL}")
+                print(f"Redis connected: {REDIS_URL}")
             except Exception as e:
-                print(f"❌ Redis connection failed: {e}")
+                print(f"Redis connection failed: {e}")
                 raise
     
     async def disconnect(self):
@@ -136,15 +137,33 @@ class EventBus:
             channel = self._channel_name(event.run_id)
             await self._redis.publish(channel, event.to_json())
             
-            # Also store in a list for late-joiners (last 100 events)
+          
             history_key = f"talos:history:{event.run_id}"
             await self._redis.rpush(history_key, event.to_json())
-            await self._redis.ltrim(history_key, -100, -1)  # Keep last 100
-            await self._redis.expire(history_key, 3600)  # Expire after 1 hour
+            await self._redis.ltrim(history_key, -100, -1) 
+            await self._redis.expire(history_key, 3600)  
             
-            print(f"📡 Event published: {event.event_type.value} - {event.title}")
+            print(f"Event published: {event.event_type.value} - {event.title}")
         except Exception as e:
-            print(f"❌ Failed to publish event: {e}")
+            print(f"Failed to publish event: {e}")
+        
+        try:
+            persist_metadata = event.metadata
+            if persist_metadata and "screenshot_base64" in persist_metadata:
+                persist_metadata = {k: v for k, v in persist_metadata.items() if k != "screenshot_base64"}
+                persist_metadata["has_screenshot"] = True
+            
+            from app.db.supabase import persist_healing_event
+            await persist_healing_event(
+                run_id=event.run_id,
+                event_type=event.event_type.value,
+                title=event.title,
+                description=event.description,
+                metadata=persist_metadata,
+            )
+        except Exception as e:
+           
+            pass
     
     async def get_history(self, run_id: str) -> list[HealingEvent]:
         """Get historical events for a run (for late-joining clients)."""
@@ -170,7 +189,7 @@ class EventBus:
                     event = HealingEvent.from_json(message["data"])
                     yield event
                     
-                    # End subscription when mission completes
+                    
                     if event.event_type in (EventType.MISSION_END, EventType.SUCCESS, EventType.FAILURE):
                         break
         finally:
@@ -178,7 +197,7 @@ class EventBus:
             await pubsub.close()
 
 
-# Global singleton for easy access
+
 _event_bus: Optional[EventBus] = None
 
 async def get_event_bus() -> EventBus:
@@ -188,11 +207,6 @@ async def get_event_bus() -> EventBus:
         _event_bus = EventBus()
         await _event_bus.connect()
     return _event_bus
-
-
-# ============================================================================
-# CONVENIENCE FUNCTIONS for the Agent
-# ============================================================================
 
 async def emit(
     run_id: str,
@@ -220,7 +234,7 @@ async def emit(
 
 async def emit_thought(run_id: str, thought: str):
     """Emit a thought from the agent's reasoning process."""
-    await emit(run_id, EventType.THOUGHT_STREAM, "💭 Thinking", thought)
+    await emit(run_id, EventType.THOUGHT_STREAM, "Thinking", thought)
 
 
 async def emit_code_diff(run_id: str, filepath: str, before: str, after: str):
@@ -228,7 +242,32 @@ async def emit_code_diff(run_id: str, filepath: str, before: str, after: str):
     await emit(
         run_id, 
         EventType.CODE_DIFF, 
-        f"📝 Proposed Fix: {filepath}",
+        f"Proposed Fix: {filepath}",
         "",
         metadata={"filepath": filepath, "before": before, "after": after}
+    )
+
+
+async def emit_screenshot(run_id: str, title: str, screenshot_base64: str, description: str = ""):
+    """Emit a screenshot for the Visual Cortex display."""
+    await emit(
+        run_id,
+        EventType.SCREENSHOT,
+        f"{title}",
+        description,
+        metadata={"screenshot_base64": screenshot_base64}
+    )
+
+
+async def emit_visual_analysis(run_id: str, analysis: dict):
+    """Emit visual analysis results from Gemini Vision."""
+    has_issues = analysis.get("has_issues", False)
+    issues_count = len(analysis.get("issues", []))
+    title = f"{issues_count} Visual Issue(s) Detected" if has_issues else "No Visual Issues"
+    await emit(
+        run_id,
+        EventType.VISUAL_ANALYSIS,
+        title,
+        analysis.get("screenshot_description", ""),
+        metadata=analysis
     )

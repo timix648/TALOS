@@ -22,6 +22,11 @@ async def event_generator(run_id: str) -> AsyncGenerator[str, None]:
     """
     Generates SSE-formatted events for a healing run.
     
+    Uses an asyncio.Queue bridge with a background reader task so we can
+    send SSE keep-alive comments (`: keepalive`) every 15 seconds when
+    no events arrive.  This prevents proxies and browsers from closing
+    idle connections during long-running phases like Visual Cortex capture.
+    
     SSE Format:
         event: <event_type>
         data: <json_payload>
@@ -29,36 +34,64 @@ async def event_generator(run_id: str) -> AsyncGenerator[str, None]:
         (blank line to separate events)
     """
     bus = await get_event_bus()
-    
-    # First, send any historical events (for late-joiners)
+ 
     history = await bus.get_history(run_id)
     is_already_complete = False
     
     for event in history:
         yield f"event: {event.event_type.value}\ndata: {event.to_json()}\n\n"
-        # Check if run already completed
+
         if event.event_type in (EventType.MISSION_END, EventType.SUCCESS, EventType.FAILURE):
             is_already_complete = True
     
-    # Send a "connected" ping
+  
     yield f"event: connected\ndata: {{\"run_id\": \"{run_id}\", \"message\": \"Connected to TALOS Neural Stream\"}}\n\n"
     
-    # If run already completed, don't wait for more events
+ 
     if is_already_complete:
         yield f"event: complete\ndata: {{\"message\": \"Run already completed\"}}\n\n"
         return
-    
-    # Now stream live events
+ 
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def _reader():
+        """Background task that pumps events from Redis into the queue."""
+        try:
+            async for event in bus.subscribe(run_id):
+                await queue.put(event)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"SSE reader error for {run_id}: {e}")
+     
+        await queue.put(None)
+
+    reader_task = asyncio.create_task(_reader())
+
     try:
-        async for event in bus.subscribe(run_id):
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+               
+                yield ": keepalive\n\n"
+                continue
+
+            if event is None:
+          
+                break
+
             yield f"event: {event.event_type.value}\ndata: {event.to_json()}\n\n"
-            
-            # Keep-alive ping every event
-            await asyncio.sleep(0.01)
-            
+
     except asyncio.CancelledError:
-        # Client disconnected
+      
         yield f"event: disconnected\ndata: {{\"message\": \"Stream ended\"}}\n\n"
+    finally:
+        reader_task.cancel()
+        try:
+            await reader_task
+        except asyncio.CancelledError:
+            pass
 
 
 @router.get("/stream/{run_id}")
@@ -88,8 +121,8 @@ async def stream_healing_events(run_id: str):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-            "Access-Control-Allow-Origin": "*",  # CORS for frontend
+            "X-Accel-Buffering": "no",  
+            "Access-Control-Allow-Origin": "*",
         }
     )
 
@@ -118,8 +151,8 @@ async def get_run_history(run_id: str):
             ]
         }
     except Exception as e:
-        print(f"❌ Failed to get history for {run_id}: {e}")
-        # Return empty events on error so frontend doesn't crash
+        print(f"Failed to get history for {run_id}: {e}")
+       
         return {
             "run_id": run_id,
             "events": [],

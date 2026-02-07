@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-/**
- * Get Current Session
- * ====================
- * Returns the current user session from cookies.
- */
 
 export async function GET(request: NextRequest) {
   const sessionCookie = request.cookies.get("talos_session");
@@ -27,11 +22,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * Logout
- * =======
- * Clears the session cookie.
- */
 export async function DELETE() {
   const response = NextResponse.json({ success: true });
   response.cookies.delete("talos_session");

@@ -8,18 +8,18 @@ from google.genai import types
 from app.core.key_manager import key_rotator
 from app.core.github_auth import get_installation_access_token
 from app.core.repomix import get_repomix_script
-from app.core.event_bus import emit, emit_thought, emit_code_diff, EventType
+from app.core.event_bus import emit, emit_thought, emit_code_diff, emit_screenshot, emit_visual_analysis, EventType
+from app.core.visual_cortex import (
+    run_visual_regression_check,
+    analyze_screenshot_with_gemini,
+    get_playwright_setup_script
+)
 
 MODEL_NAME = "gemini-3-flash-preview"
-MODEL_NAME_PRO = "gemini-2.5-pro-exp-03-25"  # System 2: Deep reasoning
+MODEL_NAME_PRO = "gemini-2.5-pro-exp-03-25"  
 
-# Global set to track repos where user has allowed retry (bypasses duplicate PR check)
 RETRY_ALLOWED_REPOS: set[str] = set()
 
-
-# ============================================================================
-# FIX PARSER: Extract code fixes from Gemini's response
-# ============================================================================
 def parse_fix_from_response(response: str) -> dict:
     """
     Parses the structured response from Gemini to extract:
@@ -50,7 +50,7 @@ def parse_fix_from_response(response: str) -> dict:
             })
     
     # Extract verification command
-    verify_pattern = r'## 🧪 VERIFICATION COMMAND\s*```(?:bash)?\s*\n(.*?)```'
+    verify_pattern = r'## VERIFICATION COMMAND\s*```(?:bash)?\s*\n(.*?)```'
     verify_match = re.search(verify_pattern, response, re.DOTALL)
     if verify_match:
         result["verification_command"] = verify_match.group(1).strip()
@@ -59,7 +59,7 @@ def parse_fix_from_response(response: str) -> dict:
     title_patterns = [
         r'\*\*Title\*\*:\s*(.+?)(?:\n|$)',           # **Title**: text
         r'Title:\s*(.+?)(?:\n|$)',                   # Title: text
-        r'## 📝 PR DESCRIPTION.*?\*\*Title\*\*:\s*(.+?)(?:\n|$)',  # Under PR section
+        r'## PR DESCRIPTION.*?\*\*Title\*\*:\s*(.+?)(?:\n|$)',  # Under PR section
     ]
     for pattern in title_patterns:
         title_match = re.search(pattern, response, re.IGNORECASE)
@@ -87,9 +87,6 @@ def parse_fix_from_response(response: str) -> dict:
     return result
 
 
-# ============================================================================
-# DUPLICATE PR CHECK: Prevent creating PRs for already-fixed errors
-# ============================================================================
 async def check_existing_talos_pr(
     token: str,
     repo_full_name: str,
@@ -109,7 +106,7 @@ async def check_existing_talos_pr(
     """
     # Check if user has allowed retry for this repo
     if repo_full_name in RETRY_ALLOWED_REPOS:
-        print(f"   🔄 Retry allowed for {repo_full_name} - skipping duplicate check")
+        print(f"   Retry allowed for {repo_full_name} - skipping duplicate check")
         RETRY_ALLOWED_REPOS.discard(repo_full_name)  # Clear the flag after use
         return None  # Proceed with new PR
     
@@ -142,7 +139,7 @@ async def check_existing_talos_pr(
                     
                     # Check if this is a TALOS PR
                     if head_ref.startswith("fix/talos-") or "TALOS" in body:
-                        print(f"   🔍 Found existing TALOS PR: #{pr['number']} - {pr['title']}")
+                        print(f"   Found existing TALOS PR: #{pr['number']} - {pr['title']}")
                         return {
                             "number": pr["number"],
                             "url": pr["html_url"],
@@ -153,17 +150,14 @@ async def check_existing_talos_pr(
                 
                 return None  # No existing TALOS PR
             else:
-                print(f"   ⚠️ Could not check PRs: {response.status_code}")
+                print(f"   Could not check PRs: {response.status_code}")
                 return None  # Proceed anyway if check fails
                 
     except Exception as e:
-        print(f"   ⚠️ PR check error: {e}")
+        print(f"   PR check error: {type(e).__name__}: {e!r}")
         return None  # Proceed anyway if check fails
 
 
-# ============================================================================
-# PR CREATION: Open Pull Request via GitHub API (Guide Section 8)
-# ============================================================================
 async def create_pull_request(
     token: str,
     repo_full_name: str,
@@ -185,7 +179,7 @@ async def create_pull_request(
     }
     
     # Add TALOS signature to the body
-    enhanced_body = f"""## 🤖 Automated Fix by TALOS Agent
+    enhanced_body = f"""## Automated Fix by TALOS Agent
 
 {body}
 
@@ -201,25 +195,42 @@ async def create_pull_request(
         "base": base_branch
     }
     
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=payload)
-            
-            if response.status_code == 201:
-                pr_data = response.json()
-                return pr_data.get("html_url")
-            else:
-                print(f"   ❌ GitHub API Error: {response.status_code} - {response.text}")
-                return None
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"   PR creation attempt {attempt}/{max_attempts}...")
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=30.0)) as client:
+                response = await client.post(url, headers=headers, json=payload)
                 
-    except Exception as e:
-        print(f"   ❌ PR Creation Exception: {e}")
-        return None
+                if response.status_code == 201:
+                    pr_data = response.json()
+                    return pr_data.get("html_url")
+                elif response.status_code == 422:
+                  
+                    error_text = response.text[:500] if response.text else "No response body"
+                    print(f"   GitHub API Validation Error (no retry): {error_text}")
+                    return None
+                else:
+                    error_text = response.text[:500] if response.text else "No response body"
+                    print(f"   GitHub API Error (attempt {attempt}): {response.status_code} - {error_text}")
+                    
+        except httpx.TimeoutException as e:
+            print(f"   PR Creation Timeout (attempt {attempt}): {type(e).__name__} after 60s")
+        except httpx.ConnectError as e:
+            print(f"   PR Creation Connection Error (attempt {attempt}): {e}")
+        except Exception as e:
+            print(f"   PR Creation Exception (attempt {attempt}): {type(e).__name__}: {e}")
+        
+        # Wait before retrying (exponential backoff: 3s, 9s)
+        if attempt < max_attempts:
+            wait_time = 3 ** attempt
+            print(f"   Retrying in {wait_time}s...")
+            import asyncio
+            await asyncio.sleep(wait_time)
+    
+    print(f"   PR creation failed after {max_attempts} attempts")
+    return None
 
-
-# ============================================================================
-# PERCEPTION LAYER: Log Normalization (From Guide Section 4.1)
-# ============================================================================
 def normalize_log(raw_log: str) -> str:
     """
     Sanitize and normalize raw CI/CD logs.
@@ -271,6 +282,8 @@ def extract_stack_trace(log: str) -> dict:
         r'at\s+(?:\w+\s+)?\(?([^:\s]+):(\d+)(?::\d+)?\)?',  # JS stack trace
         r'File "([^"]+)", line (\d+)',  # Python stack trace
         r'([^\s:]+\.(?:js|ts|jsx|tsx|py|rs)):(\d+)',  # Generic file:line
+        r'^(/[^\s]+\.(?:js|ts|jsx|tsx))\s+(\d+):\d+\s+error',  # ESLint format: /path/file.tsx 3:11 error
+        r'([^\s]+\.(?:js|ts|jsx|tsx))\s+(\d+):\d+\s+error',  # ESLint format without leading slash
     ]
     
     for pattern in file_patterns:
@@ -287,20 +300,16 @@ def extract_stack_trace(log: str) -> dict:
     
     return result
 
-
-# ============================================================================
-# CONTEXTUAL ENGINE: Root vs Inner File Detection (From Guide Section 5)
-# ============================================================================
 def analyze_dependency_graph(box, hot_files: list, project_type: str) -> dict:
     """
     Build dependency graph to distinguish Root (caller) vs Inner (callee) files.
     Uses dependency-cruiser for JS/TS, or import analysis for Python.
     """
-    print("🔗 TALOS: Building dependency graph...")
+    print("TALOS: Building dependency graph...")
     
     result = {
-        "crash_site": None,  # Where the error occurred (Inner)
-        "patient_zero": None,  # Where the bug originated (Root)
+        "crash_site": None,  
+        "patient_zero": None,  
         "dependency_chain": []
     }
     
@@ -350,7 +359,7 @@ def correlate_with_git_diff(box, hot_files: list, dependency_chain: list) -> dic
     1. If crash_file was modified → it's likely the source
     2. If crash_file was NOT modified but a caller was → caller is Patient Zero
     """
-    print("🔬 TALOS: Correlating with git history...")
+    print("TALOS: Correlating with git history...")
     
     result = {
         "modified_files": [],
@@ -358,22 +367,32 @@ def correlate_with_git_diff(box, hot_files: list, dependency_chain: list) -> dic
         "diagnosis": ""
     }
     
+    # Files to NEVER consider as Patient Zero (auto-generated, not user code)
+    IGNORE_FILES = {
+        'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock',
+        'Cargo.lock', 'Gemfile.lock', 'composer.lock', '.DS_Store'
+    }
+    
     # Get list of recently changed files
     diff_result = box.run_command("git diff --name-only HEAD~1 2>/dev/null || git diff --name-only HEAD 2>/dev/null || echo ''")
-    modified_files = [f.strip() for f in diff_result['stdout'].strip().split('\n') if f.strip()]
-    result["modified_files"] = modified_files
+    all_modified = [f.strip() for f in diff_result['stdout'].strip().split('\n') if f.strip()]
+    
+    # Filter out lock files and other noise
+    modified_files = [f for f in all_modified if os.path.basename(f) not in IGNORE_FILES]
+    result["modified_files"] = modified_files if modified_files else all_modified
     
     if not modified_files:
         # Fallback: check staged/unstaged changes
         diff_result = box.run_command("git status --short | awk '{print $2}'")
-        modified_files = [f.strip() for f in diff_result['stdout'].strip().split('\n') if f.strip()]
-        result["modified_files"] = modified_files
+        all_modified = [f.strip() for f in diff_result['stdout'].strip().split('\n') if f.strip()]
+        modified_files = [f for f in all_modified if os.path.basename(f) not in IGNORE_FILES]
+        result["modified_files"] = modified_files if modified_files else all_modified
     
-    # Triangulation: Stack Trace + Dependency Graph + Git History
+   
     hot_file_paths = [h["file"] for h in hot_files]
     
     for hot_file in hot_file_paths:
-        # Check if this hot file was modified
+     
         hot_basename = os.path.basename(hot_file)
         for modified in modified_files:
             if hot_basename in modified or modified in hot_file:
@@ -381,7 +400,7 @@ def correlate_with_git_diff(box, hot_files: list, dependency_chain: list) -> dic
                 result["diagnosis"] = f"The error occurred in '{hot_file}', and this file WAS recently modified. This is the Patient Zero."
                 return result
     
-    # If crash file wasn't modified, check the callers
+    
     for caller in dependency_chain:
         caller_basename = os.path.basename(caller)
         for modified in modified_files:
@@ -390,10 +409,20 @@ def correlate_with_git_diff(box, hot_files: list, dependency_chain: list) -> dic
                 result["diagnosis"] = f"The error manifested in a callee file, but the bug is in '{modified}' (a caller that was recently modified and passed bad data)."
                 return result
     
-    # Fallback: Just report what was modified
+    
     if modified_files:
         result["patient_zero"] = modified_files[0]
         result["diagnosis"] = f"Could not determine exact causation. Recently modified files: {modified_files}"
+    
+   
+    if modified_files:
+        try:
+            diff_content = box.run_command("git diff HEAD~1 2>/dev/null || git diff HEAD 2>/dev/null || echo 'No diff available'")
+            result["diff_content"] = diff_content['stdout'][:5000]  
+        except:
+            result["diff_content"] = ""
+    else:
+        result["diff_content"] = ""
     
     return result
 
@@ -403,7 +432,7 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
     The Main Event Loop: Trigger -> Auth -> Scout -> Reason -> Plan
     Now with real-time event broadcasting for the Neural Dashboard.
     """
-    # Generate run_id if not provided (for backward compatibility)
+   
     if run_id is None:
         import uuid
         run_id = str(uuid.uuid4())[:8]
@@ -412,62 +441,61 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
     installation_id = payload.get("installation", {}).get("id")
     repo_url = payload.get("repository", {}).get("clone_url")
     
-    print(f"🚀 TALOS: Mission Start for {repo_full_name} (Run ID: {run_id})")
+    print(f"TALOS: Mission Start for {repo_full_name} (Run ID: {run_id})")
     
-    # 💾 PERSIST: Create healing run in database
+    
     from app.db.supabase import create_healing_run, update_healing_run, HealingRun, get_installation
     db_installation_id = None
     try:
-        # Look up the installation UUID from the GitHub installation ID
+        
         if installation_id:
             installation = await get_installation(int(installation_id))
             if installation and installation.id:
                 db_installation_id = installation.id
     except Exception as lookup_err:
-        print(f"⚠️ TALOS: Could not look up installation: {lookup_err}")
+        print(f"TALOS: Could not look up installation: {lookup_err}")
     
     try:
         await create_healing_run(HealingRun(
             run_id=run_id,
             repo_full_name=repo_full_name,
-            installation_id=db_installation_id,  # Use the UUID, not the GitHub ID
+            installation_id=db_installation_id, 
             status="running"
         ))
-        print(f"💾 TALOS: Run {run_id} saved to database")
+        print(f"TALOS: Run {run_id} saved to database")
     except Exception as db_err:
-        print(f"⚠️ TALOS: Could not save run to DB: {db_err}")
-    
-    # 🎬 BROADCAST: Mission Start
+        print(f"TALOS: Could not save run to DB: {db_err}")
+
     await emit(
         run_id, EventType.MISSION_START,
-        "🚀 Mission Initiated",
+        "Mission Initiated",
         f"TALOS is healing {repo_full_name}",
         metadata={"repo": repo_full_name, "installation_id": installation_id}
     )
 
     try:
         token = await get_installation_access_token(installation_id)
-        print(f"🔐 TALOS: Authenticated.")
-        await emit(run_id, EventType.SCOUTING, "🔐 Authenticated", "Obtained GitHub installation token")
+        print(f"TALOS: Authenticated.")
+        await emit(run_id, EventType.SCOUTING, "Authenticated", "Obtained GitHub installation token")
     except Exception as e:
-        print(f"❌ TALOS: Auth Failed: {e}")
+        print(f"TALOS: Auth Failed: {e}")
         await update_healing_run(run_id, status="failure", error_type="auth_failed")
-        await emit(run_id, EventType.FAILURE, "❌ Authentication Failed", str(e))
+        await emit(run_id, EventType.FAILURE, "Authentication Failed", str(e))
         return
 
     from app.core.sandbox import TaskSandbox
     
     try:
-        # 🎬 BROADCAST: Cloning
-        await emit(run_id, EventType.CLONING, "📦 Cloning Repository", f"Spinning up isolated sandbox for {repo_full_name}")
+        
+        await emit(run_id, EventType.CLONING, "Cloning Repository", f"Spinning up isolated sandbox for {repo_full_name}")
         
         with TaskSandbox(repo_url, token) as box:
-            print("📦 TALOS: Repo cloned.")
-            await emit(run_id, EventType.CLONING, "📦 Repository Cloned", "Isolated E2B sandbox ready")
+            print("TALOS: Repo cloned.")
+            await emit(run_id, EventType.CLONING, "Repository Cloned", "Isolated E2B sandbox ready")
             
             # --- PHASE 0: POLYGLOT SCOUT (The Brain) ---
-            print("🔭 TALOS: Identifying language and project structure...")
-            await emit(run_id, EventType.SCOUTING, "🔭 Scouting Project", "Detecting language, framework, and structure...")
+            print("TALOS: Identifying language and project structure...")
+            await emit(run_id, EventType.SCOUTING, "Scouting Project", "Detecting language, framework, and structure...")
             
             # 1. Search for key manifest files
             has_package_json = box.run_command("find . -name package.json -not -path '*/node_modules/*' | head -n 1")
@@ -481,7 +509,7 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
             # 2. Decide Strategy based on evidence
             if has_package_json['stdout'].strip():
                 project_type_display = "Node.js / JavaScript"
-                print("✨ Detected: Node.js Project")
+                print("Detected: Node.js Project")
                 file_path = has_package_json['stdout'].strip()
                 work_dir = os.path.dirname(file_path) or "."
                 
@@ -518,92 +546,105 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
                     test_command = "pip install . && pytest"
                     
             elif has_cargo['stdout'].strip():
-                print("✨ Detected: Rust Project")
+                print("Detected: Rust Project")
                 file_path = has_cargo['stdout'].strip()
                 work_dir = os.path.dirname(file_path)
                 test_command = "cargo test"
                 
             else:
-                print("⚠️ Unknown Project Type. Defaulting to root exploration.")
+                print("Unknown Project Type. Defaulting to root exploration.")
 
-            print(f"📍 Working Directory: '{work_dir}'")
-            print(f"🛠️ Test Command: '{test_command}'")
+            print(f"Working Directory: '{work_dir}'")
+            print(f"Test Command: '{test_command}'")
             
             await emit(run_id, EventType.SCOUTING, f"✨ Detected: {project_type_display if 'project_type_display' in dir() else 'Unknown'}", 
                       f"Working in: {work_dir}")
 
             # --- PHASE A: ACTIVATE THE EYES (Repomix) ---
             print("👁️ TALOS: Reading codebase...")
-            await emit(run_id, EventType.READING_CODE, "👁️ Reading Codebase", "Assembling repository context with Repomix...")
+            await emit(run_id, EventType.READING_CODE, "Reading Codebase", "Assembling repository context with Repomix...")
             
             box.write_file("repomix_script.py", get_repomix_script())
             repo_context_result = box.run_command("python3 repomix_script.py")
             repo_context = repo_context_result['stdout']
             
             # --- PHASE B: THE PAIN SIGNAL ---
-            print(f"🕵️ TALOS: Reproducing error...")
-            await emit(run_id, EventType.ANALYZING, "🕵️ Reproducing Error", f"Running: {test_command[:50]}...")
+            print(f"TALOS: Reproducing error...")
+            await emit(run_id, EventType.ANALYZING, "Reproducing Error", f"Running: {test_command[:50]}...")
             
             # Execute the DYNAMIC command found in Phase 0
             full_cmd = f"cd {work_dir} && {test_command}"
             test_result = box.run_command(full_cmd) 
             
             raw_error_log = test_result['stdout'] + "\n" + test_result['stderr']
-            
-            # ============================================================
-            # NEW: PERCEPTION LAYER (Guide Section 4.1)
-            # ============================================================
-            print("🔍 TALOS: Normalizing and analyzing error log...")
-            await emit(run_id, EventType.ANALYZING, "🔍 Analyzing Error Log", "Stripping noise, extracting stack trace DNA...")
+          
+            print("TALOS: Normalizing and analyzing error log...")
+            await emit(run_id, EventType.ANALYZING, "Analyzing Error Log", "Stripping noise, extracting stack trace DNA...")
             
             # Step 1: Sanitize the log (strip ANSI, noise)
             clean_log = normalize_log(raw_error_log)
             
             # Step 2: Extract stack trace DNA
             stack_analysis = extract_stack_trace(clean_log)
-            print(f"   📊 Error Type: {stack_analysis['error_type']}")
-            print(f"   📂 Hot Files: {[h['file'] for h in stack_analysis['hot_files'][:3]]}")
+            print(f"   Error Type: {stack_analysis['error_type']}")
+            print(f"   Hot Files: {[h['file'] for h in stack_analysis['hot_files'][:3]]}")
             
-            await emit(run_id, EventType.DIAGNOSING, f"📊 Error Classification: {stack_analysis['error_type']}", 
+            await emit(run_id, EventType.DIAGNOSING, f"Error Classification: {stack_analysis['error_type']}", 
                       f"Message: {stack_analysis['error_message'][:100]}..." if stack_analysis['error_message'] else "Analyzing hot files...",
                       metadata={"error_type": stack_analysis['error_type'], "hot_files": stack_analysis['hot_files'][:3]})
             
             # Determine project type for dependency analysis
             project_type = "nodejs" if has_package_json['stdout'].strip() else "python" if has_requirements['stdout'].strip() else "unknown"
             
-            # ============================================================
-            # NEW: ROOT VS INNER ANALYSIS (Guide Section 5)
-            # ============================================================
-            await emit(run_id, EventType.ANALYZING, "🔬 Tracing Dependency Graph", "Distinguishing root cause from crash site...")
+     
+            await emit(run_id, EventType.ANALYZING, "Tracing Dependency Graph", "Distinguishing root cause from crash site...")
             
             dep_graph = analyze_dependency_graph(box, stack_analysis['hot_files'], project_type)
             git_correlation = correlate_with_git_diff(box, stack_analysis['hot_files'], dep_graph['dependency_chain'])
             
             if git_correlation['patient_zero']:
-                print(f"   🎯 Patient Zero: {git_correlation['patient_zero']}")
-                print(f"   💡 Diagnosis: {git_correlation['diagnosis']}")
-                await emit(run_id, EventType.DIAGNOSING, f"🎯 Patient Zero: {git_correlation['patient_zero']}", 
+                print(f"   Patient Zero: {git_correlation['patient_zero']}")
+                print(f"   Diagnosis: {git_correlation['diagnosis']}")
+                await emit(run_id, EventType.DIAGNOSING, f"Patient Zero: {git_correlation['patient_zero']}", 
                           git_correlation['diagnosis'],
                           metadata={"patient_zero": git_correlation['patient_zero'], "modified_files": git_correlation['modified_files']})
             
-            # ============================================================
-            # NEW: READ PATIENT ZERO FILE DIRECTLY (Critical for accurate fixes!)
-            # ============================================================
+         
+            await update_healing_run(
+                run_id,
+                error_type=stack_analysis.get('error_type'),
+                patient_zero=git_correlation.get('patient_zero'),
+                metadata={
+                    "error_message": stack_analysis.get('error_message', '')[:2000],
+                    "error_type": stack_analysis.get('error_type'),
+                    "hot_files": stack_analysis.get('hot_files', [])[:5],
+                    "crash_site": dep_graph.get('crash_site'),
+                    "dependency_chain": dep_graph.get('dependency_chain', [])[:5],
+                    "modified_files": git_correlation.get('modified_files', []),
+                    "diagnosis": git_correlation.get('diagnosis', ''),
+                    "project_type": project_type,
+                    "test_command": test_command,
+                    "clean_error_log": clean_log[:3000],
+                    "diff_content": git_correlation.get('diff_content', '')[:3000],
+                }
+            )
+            
+          
             patient_zero_content = ""
             if git_correlation['patient_zero']:
-                print(f"📄 TALOS: Reading Patient Zero file content...")
+                print(f"TALOS: Reading Patient Zero file content...")
                 pz_file = git_correlation['patient_zero']
                 try:
                     pz_read = box.run_command(f"cat '{pz_file}'")
                     if pz_read['stdout'].strip():
-                        patient_zero_content = f"\n\n{'='*60}\n🔴 PATIENT ZERO FILE CONTENT: {pz_file}\n{'='*60}\n{pz_read['stdout']}\n{'='*60}"
-                        print(f"   ✅ Read {len(pz_read['stdout'])} chars from Patient Zero")
+                        patient_zero_content = f"\n\n{'='*60}\nPATIENT ZERO FILE CONTENT: {pz_file}\n{'='*60}\n{pz_read['stdout']}\n{'='*60}"
+                        print(f"   Read {len(pz_read['stdout'])} chars from Patient Zero")
                 except Exception as e:
-                    print(f"   ⚠️ Could not read Patient Zero: {e}")
+                    print(f"   Could not read Patient Zero: {e}")
             
             # Also read any other modified files
             modified_files_content = ""
-            for mod_file in git_correlation.get('modified_files', [])[:3]:  # Limit to 3
+            for mod_file in git_correlation.get('modified_files', [])[:3]:  
                 if mod_file != git_correlation.get('patient_zero'):
                     try:
                         mod_read = box.run_command(f"cat '{mod_file}'")
@@ -611,57 +652,91 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
                             modified_files_content += f"\n\n=== MODIFIED FILE: {mod_file} ===\n{mod_read['stdout']}"
                     except:
                         pass
-
-            # --- PHASE B.5: DEEP SYNTAX SCAN (for when test script is missing) ---
-            # If we only got "Missing script: test" error, we need to dig deeper
-            if "Missing script" in clean_log or "no test specified" in clean_log.lower():
-                print("🔍 TALOS: Test script missing - performing deep syntax scan...")
-                
-                # Find all JS/TS/JSX/TSX files and look for obvious syntax errors
-                scan_cmd = """
-                find . -type f \\( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" \\) \
-                -not -path '*/node_modules/*' -exec grep -l -E \
-                '(^xport |^impor |^retur |^functio |^cons |^le |^va |function [a-zA-Z]+\\)|=> \\{$)' {} \\; 2>/dev/null
-                """
-                suspicious_files = box.run_command(scan_cmd)
-                
-                if suspicious_files['stdout'].strip():
-                    print(f"🚨 TALOS: Found suspicious files with potential syntax errors!")
-                    # Read the content of suspicious files to give Gemini real context
-                    for f in suspicious_files['stdout'].strip().split('\n')[:5]:  # Limit to 5 files
-                        content = box.run_command(f"cat '{f.strip()}'")
-                        clean_log += f"\n\n=== SUSPICIOUS FILE: {f.strip()} ===\n{content['stdout']}"
-                        clean_log += f"\n[TALOS HINT: Check for typos like 'xport' instead of 'export', 'retur' instead of 'return', missing parentheses, etc.]"
             
-            # ============================================================
-            # PHASE C: THE THINKING (Gemini 3) - ReAct Pattern (Guide Section 6)
-            # ============================================================
-            print("🧠 TALOS: Engaging cognitive core...")
-            await emit(run_id, EventType.THINKING, "🧠 Engaging Cognitive Core", 
+           
+            error_files_content = ""
+            files_already_read = set([git_correlation.get('patient_zero')] + git_correlation.get('modified_files', []))
+            
+            for hot_file in stack_analysis.get('hot_files', []):
+                file_path = hot_file.get('file', '')
+                
+                normalized = file_path.replace('/home/user/repo/', '').lstrip('./')
+                
+                if normalized and normalized not in files_already_read:
+                    print(f"TALOS: Reading error-log file: {normalized}")
+                    try:
+                        file_read = box.run_command(f"cat '{normalized}'")
+                        if file_read['stdout'].strip():
+                            error_files_content += f"\n\n{'='*60}\nFILE FROM ERROR LOG: {normalized} (line {hot_file.get('line', '?')})\n{'='*60}\n{file_read['stdout']}\n{'='*60}"
+                            files_already_read.add(normalized)
+                            print(f"   Read {len(file_read['stdout'])} chars from {normalized}")
+                    except Exception as e:
+                        print(f"   Could not read {normalized}: {e}")
+
+            # --- PHASE B.5: FALLBACK FILE READER (for when test script is missing) ---
+   
+            if ("Missing script" in clean_log or "no test specified" in clean_log.lower()) and not patient_zero_content:
+                print("TALOS: No build errors and no patient zero - reading modified files as fallback...")
+                for mod_file in git_correlation.get('modified_files', [])[:3]:
+                    try:
+                        content = box.run_command(f"cat '{mod_file}'")
+                        if content['stdout'].strip():
+                            clean_log += f"\n\n=== MODIFIED FILE: {mod_file} ===\n{content['stdout']}"
+                    except:
+                        pass
+            
+           
+            print("TALOS: Engaging cognitive core...")
+            
+            
+            print("\n" + "="*60)
+            print("DEBUG: Data being sent to Gemini")
+            print("="*60)
+            print(f"   Patient Zero: {git_correlation.get('patient_zero', 'None')}")
+            print(f"   Modified Files: {git_correlation.get('modified_files', [])}")
+            print(f"   Diff content length: {len(git_correlation.get('diff_content', ''))} chars")
+            print(f"   Patient Zero content length: {len(patient_zero_content)} chars")
+            print(f"   Clean log length: {len(clean_log)} chars")
+            print(f"   Repo context length: {len(repo_context)} chars")
+            
+            if patient_zero_content:
+                print(f"\nPATIENT ZERO PREVIEW (first 500 chars):")
+                print(patient_zero_content[:500])
+            else:
+                print(f"\nWARNING: patient_zero_content is EMPTY!")
+            
+            if git_correlation.get('diff_content'):
+                print(f"\nGIT DIFF PREVIEW (first 500 chars):")
+                print(git_correlation.get('diff_content', '')[:500])
+            else:
+                print(f"\nWARNING: git diff_content is EMPTY!")
+            print("="*60 + "\n")
+            
+            await emit(run_id, EventType.THINKING, "Engaging Cognitive Core", 
                       "Gemini 3 is analyzing the error and generating a fix...",
                       metadata={"model": MODEL_NAME})
             
-            # Build the enhanced prompt with all our analysis
+            
             prompt = f"""
             You are Talos, an autonomous site reliability engineer (Species: Gemini 3).
             Your role is to ACT as a "Translation Layer" - turning opaque error logs into clear diagnosis and fixes.
             
             ════════════════════════════════════════════════════════════
-            📋 MISSION CONTEXT
+            MISSION CONTEXT
             ════════════════════════════════════════════════════════════
             Project Type: {project_type.upper()}
             Working Directory: {work_dir}
             Test Command Used: {test_command}
             
             ════════════════════════════════════════════════════════════
-            🔬 STACK TRACE ANALYSIS (Pre-processed)
+            STACK TRACE ANALYSIS (Pre-processed)
             ════════════════════════════════════════════════════════════
             Error Classification: {stack_analysis['error_type']}
             Error Message: {stack_analysis['error_message']}
             Hot Files (Crash Sites): {stack_analysis['hot_files']}
             
             ════════════════════════════════════════════════════════════
-            🎯 ROOT VS INNER FILE ANALYSIS (Patient Zero Detection)
+            ROOT VS INNER FILE ANALYSIS (Patient Zero Detection)
             ════════════════════════════════════════════════════════════
             Crash Site (Inner): {dep_graph['crash_site']}
             Dependency Chain (Callers): {dep_graph['dependency_chain']}
@@ -670,24 +745,34 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
             Diagnosis: {git_correlation['diagnosis']}
             
             ════════════════════════════════════════════════════════════
-            📝 CLEANED ERROR LOG
+            CLEANED ERROR LOG (THIS IS YOUR #1 SOURCE OF TRUTH!)
             ════════════════════════════════════════════════════════════
             {clean_log}
             
             ════════════════════════════════════════════════════════════
-            � PATIENT ZERO FILE (THE BROKEN CODE - FIX THIS!)
+            GIT DIFF (EXACTLY what changed in the last commit)
+            ════════════════════════════════════════════════════════════
+            {git_correlation.get('diff_content', 'No diff available')}
+            
+            ════════════════════════════════════════════════════════════
+            PATIENT ZERO FILE (THE BROKEN CODE - FIX THIS!)
             ════════════════════════════════════════════════════════════
             {patient_zero_content if patient_zero_content else "Could not read Patient Zero file"}
             
             {modified_files_content if modified_files_content else ""}
             
             ════════════════════════════════════════════════════════════
-            📦 REPOSITORY CONTEXT (Repomix)
+            FILES MENTIONED IN ERROR LOG (MUST READ THESE!)
+            ════════════════════════════════════════════════════════════
+            {error_files_content if error_files_content else "No additional error files found"}
+            
+            ════════════════════════════════════════════════════════════
+            REPOSITORY CONTEXT (Repomix - reference only, DO NOT use this to rewrite files)
             ════════════════════════════════════════════════════════════
             {repo_context}
             
             ════════════════════════════════════════════════════════════
-            🎯 YOUR MISSION (OODA Loop - Guide Section 2.2)
+            YOUR MISSION (OODA Loop - Guide Section 2.2)
             ════════════════════════════════════════════════════════════
             
             You are an autonomous Site Reliability Engineer. Your job is to DIAGNOSE and FIX bugs.
@@ -740,23 +825,84 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
             │    // Then use val in render                                │
             └─────────────────────────────────────────────────────────────┘
             
-            ⚠️ CRITICAL RULES:
+            ABSOLUTE #1 RULE — READ THIS FIRST  
             
-            1. MINIMAL CHANGES ONLY!
-               - ONLY fix what is broken
-               - DO NOT rewrite or "improve" working code
-               - DO NOT change text content, messages, or UI copy
-               - DO NOT add features or enhancements
-               - If original says <p>Lucky Number!</p>, keep EXACTLY that text
-               - If original says <p>Try again.</p>, keep EXACTLY that text
+            YOU ARE A SYNTAX-ERROR FIXER. NOTHING ELSE.
+            Your ONLY job is to correct the specific characters/tokens that
+            cause the build, lint, or test command to fail.
             
-            2. NEVER DELETE FUNCTIONALITY!
-               - Make the code WORK, not remove features
-               - Preserve all original behavior and output
+            YOU MUST NOT:
+            - Rewrite, reorganize, refactor, or "improve" ANY code
+            - Change variable names, class names, strings, comments, or whitespace
+            - Add new imports, components, functions, or features
+            - Remove existing imports, components, functions, or features
+            - Replace the user's code with boilerplate / default template code
+            - Change ANY line that is NOT directly causing the error
             
-            3. PRESERVE ORIGINAL TEXT EXACTLY!
-               - String literals, messages, and UI text must stay identical
-               - Only change the CODE STRUCTURE, not the CONTENT
+            If you change even ONE line that is not required to fix the
+            reported error, you have FAILED your mission.
+            
+            Think of yourself as a human proofreader fixing typos in a book.
+            You fix the misspelled word. You do NOT rewrite the paragraph.
+            
+            ════════════════════════════════════════════════════════════
+            
+            PRIORITY CHAIN — Where to look for the bug:
+            
+            TIER 1 — ERROR LOG (highest confidence):
+               The build/lint/test error log tells you EXACTLY what's broken (file, line, column).
+               If the error log reports it, fix ONLY that. This is your #1 source of truth.
+            
+            TIER 2 — GIT DIFF (recently changed lines):
+               The git diff shows what changed in the last commit.
+               If Tier 1 is vague or empty (e.g. "Missing script: test"), look at the diff
+               to find what the developer broke. Lines with - (removed) and + (added) are suspects.
+            
+            TIER 3 — CODE ANALYSIS (last resort, use carefully):
+               If BOTH the error log AND git diff give no useful signal, THEN carefully
+               read the Patient Zero file for obvious syntax errors (typos, unclosed tags,
+               missing brackets). But ONLY fix clear, unambiguous errors — never "improve" code.
+            
+            THE GOLDEN RULE: At every tier, ONLY fix actual errors.
+            Never "clean up", restructure, or add code that wasn't there before.
+            
+            ════════════════════════════════════════════════════════════
+            
+            SURGICAL FIX RULES:
+            
+            1. FIX ONLY THE EXACT ERROR
+               - If the error says "Unexpected token on line 42" → fix line 42 ONLY
+               - If the error says "'export' is not defined" → fix the typo (e.g. xport→export)
+               - Change the MINIMUM number of characters to make the build pass
+            
+            2. PRESERVE EVERYTHING ELSE BYTE-FOR-BYTE
+               - Same structure, layout, indentation, and organization
+               - Same text, strings, class names, and variable names
+               - Same imports (fix if broken, never add/remove/reorder)
+               - Same JSX/HTML elements (fix tag typos, never restructure)
+               - Same comments, blank lines, formatting choices
+               - If the file has 200 lines, your output should have ~200 lines
+            
+            3. WHAT IS A "REAL ERROR" vs "LOOKS WEIRD":
+               REAL ERROR (fix these):
+               - Something the error log explicitly complains about
+               - A clear typo in the git diff (diiv→div, functio→function, retur→return)
+               - An unclosed tag/bracket that prevents compilation
+               
+               NOT AN ERROR (DO NOT TOUCH):
+               - An import path you don't recognize — it's probably correct for their project
+               - A variable name that seems unusual — the developer chose it deliberately
+               - Code patterns you'd write differently — it's THEIR code, not yours
+               - Styling/formatting choices — not your decision
+            
+            4. EXPLICITLY FORBIDDEN ACTIONS:
+               Replacing a custom landing page with a Vite/React default template
+               Adding boilerplate code (counter components, "Hello World", etc.)
+               Combining two files into one or splitting one into two
+               Adding try/catch, error handling, or "defensive" code not in the original
+               Changing import paths that aren't causing the error
+               "Cleaning up" unused variables unless the linter error says to
+               Generating code that's significantly longer OR shorter than the original
             
             CHAIN OF THOUGHT (CoT) - Reason step-by-step:
             
@@ -770,67 +916,108 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
             
             RESPONSE FORMAT:
             
-            ## 🔴 ERROR CLASSIFICATION
+            ## ERROR CLASSIFICATION
             [Choose: Syntax Error | Logic Bug | Configuration Issue | Dependency Conflict | Runtime Error]
             
-            ## 📍 LOCATION
+            ## LOCATION
             - **Patient Zero (Root Cause File)**: [filename:line]
             - **Crash Site (Where error manifested)**: [filename:line]
             - **Why here?**: [Brief explanation of root vs inner]
             
-            ## 💬 HUMAN-READABLE EXPLANATION
+            ## HUMAN-READABLE EXPLANATION
             [Explain in plain English what went wrong. Be specific about:
              - What the developer changed
              - Why that change broke the build
              - The causal chain from change to failure]
             
-            ## ✅ THE FIX
-            Provide the COMPLETE corrected file(s):
+            ## THE FIX
+            Provide the COMPLETE corrected file(s).
+            
+            CRITICAL OUTPUT RULES:
+            - The output must be the user's EXACT original code with ONLY the broken tokens fixed
+            - Do NOT add new code, do NOT remove existing code, do NOT reorganize
+            - The fixed file MUST be approximately the same length as the original (±10%)
+            - If the original file was 150 lines, your output must be ~150 lines
+            - Copy-paste the original code, then change ONLY the broken characters
+            - If you catch yourself writing code that wasn't in the original → STOP and re-read the original
             
             **File: [filename]**
             ```[language]
-            [Complete corrected code - not just a snippet]
+            [The user's EXACT original code with ONLY the broken tokens/lines corrected]
             ```
             
-            ## 🧪 VERIFICATION COMMAND
+            ## VERIFICATION COMMAND
             ```bash
             [The exact command to run to verify the fix works]
             ```
             
-            ## 📝 PR DESCRIPTION (for automated PR creation)
+            ## PR DESCRIPTION (for automated PR creation)
             **Title**: [Short descriptive title]
             **Body**: [2-3 sentence description of what was fixed and why]
             """
             
             fix_plan = await generate_with_retry(prompt)
             
-            # ============================================================
-            # PHASE D: OUTPUT (The Face - Guide Section 3.4)
-            # ============================================================
+            
+            try:
+                await update_healing_run(
+                    run_id,
+                    metadata={
+                        "error_message": stack_analysis.get('error_message', '')[:2000],
+                        "error_type": stack_analysis.get('error_type'),
+                        "hot_files": stack_analysis.get('hot_files', [])[:5],
+                        "crash_site": dep_graph.get('crash_site'),
+                        "dependency_chain": dep_graph.get('dependency_chain', [])[:5],
+                        "modified_files": git_correlation.get('modified_files', []),
+                        "diagnosis": git_correlation.get('diagnosis', ''),
+                        "project_type": project_type,
+                        "test_command": test_command,
+                        "clean_error_log": clean_log[:3000],
+                        "diff_content": git_correlation.get('diff_content', '')[:3000],
+                        "fix_plan_summary": fix_plan[:5000], 
+                    }
+                )
+            except Exception:
+                pass 
+    
+            debug_dir = "/tmp/talos_debug"
+            try:
+                box.run_command(f"mkdir -p {debug_dir}")
+                
+                # Save the full prompt
+                prompt_debug = prompt.replace("'", "'\\''")  # Escape single quotes
+                box.run_command(f"cat > {debug_dir}/last_prompt.txt << 'TALOS_PROMPT_EOF'\n{prompt[:10000]}\nTALOS_PROMPT_EOF")
+                
+                # Save Gemini's full response
+                response_debug = fix_plan.replace("'", "'\\''")
+                box.run_command(f"cat > {debug_dir}/last_response.txt << 'TALOS_RESPONSE_EOF'\n{fix_plan}\nTALOS_RESPONSE_EOF")
+                
+                print("DEBUG: Saved prompt and response to /tmp/talos_debug/")
+            except Exception as debug_e:
+                print(f"DEBUG save failed: {debug_e}")
+            
+        
             print("\n" + "═"*60)
-            print("🧠 TALOS DIAGNOSIS & SOLUTION")
+            print("TALOS DIAGNOSIS & SOLUTION")
             print("═"*60)
             print(fix_plan)
             print("═"*60 + "\n")
             
-            # 🎬 BROADCAST: Stream the thought process to the frontend
-            await emit(run_id, EventType.THOUGHT_STREAM, "💭 Gemini's Analysis", 
+            await emit(run_id, EventType.THOUGHT_STREAM, "Gemini's Analysis", 
                       fix_plan[:1500] + "..." if len(fix_plan) > 1500 else fix_plan,
                       metadata={"full_response_length": len(fix_plan)})
             
-            # ============================================================
-            # PHASE E: VERIFICATION LOOP (Guide Section 7.2 - Red/Green/Refactor)
-            # ============================================================
-            print("🔄 TALOS: Verification Loop (Phase E)")
-            await emit(run_id, EventType.VERIFYING, "🔄 Entering Verification Loop", "Testing the proposed fix...")
+           
+            print("TALOS: Verification Loop (Phase E)")
+            await emit(run_id, EventType.VERIFYING, "Entering Verification Loop", "Testing the proposed fix...")
             
             # Step 1: Parse the fix from Gemini's response
             parsed_fix = parse_fix_from_response(fix_plan)
-            current_fix_plan = fix_plan  # Track current plan for retry prompts
+            current_fix_plan = fix_plan 
             
             if parsed_fix['files']:
-                print(f"   📄 Found {len(parsed_fix['files'])} file(s) to fix")
-                await emit(run_id, EventType.APPLYING_FIX, f"📄 Found {len(parsed_fix['files'])} file(s) to fix",
+                print(f"   Found {len(parsed_fix['files'])} file(s) to fix")
+                await emit(run_id, EventType.APPLYING_FIX, f"Found {len(parsed_fix['files'])} file(s) to fix",
                           ", ".join([f["path"] for f in parsed_fix['files']]))
                 
                 verification_passed = False
@@ -838,35 +1025,118 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
                 last_error = ""
                 
                 for attempt in range(max_retries):
-                    print(f"   🔁 Attempt {attempt + 1}/{max_retries}")
-                    await emit(run_id, EventType.VERIFYING, f"🔁 Verification Attempt {attempt + 1}/{max_retries}", 
+                    print(f"   Attempt {attempt + 1}/{max_retries}")
+                    await emit(run_id, EventType.VERIFYING, f"Verification Attempt {attempt + 1}/{max_retries}", 
                               "Applying fixes and running tests...")
+                    
+                    
+                    rejected_fixes = []
+                    applied_any_fix = False
                     
                     # Step 2: Apply the fixes
                     for file_fix in parsed_fix['files']:
                         filepath = file_fix['path']
                         content = file_fix['content']
-                        print(f"   🔧 Applying fix to: {filepath}")
+                        print(f"   Applying fix to: {filepath}")
                         
-                        # 🎬 BROADCAST: Show the code diff
                         try:
                             old_content = box.read_file(filepath)
                         except:
                             old_content = "(new file)"
+                        
+                        old_len = len(old_content) if old_content != "(new file)" else 0
+                        new_len = len(content)
+                        
+                        if old_len > 0:
+                            change_ratio = new_len / old_len
+                            print(f"   Size check: {old_len} chars → {new_len} chars (ratio: {change_ratio:.2f})")
+                            
+                            
+                            if change_ratio < 0.7:
+                                print(f"   BLOCKED: Gemini output is {100*(1-change_ratio):.0f}% SMALLER than original!")
+                                print(f"   This fix would DELETE most of the code. Rejecting.")
+                                print(f"   Gemini's destructive output (first 300 chars):")
+                                print(f"   {content[:300]}")
+                                rejected_fixes.append({
+                                    "file": filepath,
+                                    "reason": f"Fix was {100*(1-change_ratio):.0f}% smaller than original ({old_len} → {new_len} chars). This would delete the user's code.",
+                                    "original_size": old_len,
+                                    "proposed_size": new_len
+                                })
+                                await emit(run_id, EventType.RETRY, "Fix Rejected (Code Deletion)", 
+                                          f"Gemini tried to delete {100*(1-change_ratio):.0f}% of {filepath}")
+                                continue  # Skip this file, don't apply the destructive fix
+                            elif change_ratio > 1.5:
+                                print(f"   WARNING: Gemini output is {100*(change_ratio-1):.0f}% LARGER than original — may be adding unwanted code")
+                               
+                        
                         await emit_code_diff(run_id, filepath, old_content[:500], content[:500])
                         
                         box.apply_fix(filepath, content)
+                        applied_any_fix = True
                         
-                        # Debug: Verify file was written correctly
-                        print(f"   📋 Verifying file write...")
+                     
+                        print(f"   Verifying file write...")
                         check_result = box.run_command(f"head -3 '{filepath}'")
-                        print(f"   📋 First 3 lines: {check_result['stdout'][:100]}...")
+                        print(f"   First 3 lines: {check_result['stdout'][:100]}...")
+                    
+                    
+                    if rejected_fixes and not applied_any_fix:
+                        print(f"   ALL fixes rejected as destructive! Retrying with explicit feedback...")
+                        await emit(run_id, EventType.THINKING, "Re-analyzing (fix was too destructive)", 
+                                  "Telling Gemini to make surgical fixes only...")
+                        
+                        rejection_feedback = "\\n".join([f"- {r['file']}: {r['reason']}" for r in rejected_fixes])
+                        retry_prompt = f"""YOUR PREVIOUS FIX WAS REJECTED — IT DESTROYED THE USER'S CODE.
+
+## WHAT HAPPENED:
+You replaced the user's custom code with generic boilerplate/template code.
+This is EXACTLY what you must NEVER do.
+
+## REJECTION DETAILS:
+{rejection_feedback}
+
+## THE RULES (read carefully this time):
+1. The user's file has {rejected_fixes[0]['original_size']} characters of CUSTOM code
+2. Your job is to fix ONLY the syntax error — typically changing 1-10 characters
+3. Your output must be ~{rejected_fixes[0]['original_size']} characters (the same code, with typos fixed)
+4. You must NOT add new code, remove code, or restructure anything
+
+## PROCESS — Follow these steps EXACTLY:
+Step 1: Read the ORIGINAL FILE below carefully, line by line
+Step 2: Read the ERROR message to identify WHICH line/token is broken  
+Step 3: Find that EXACT broken token in the original file
+Step 4: Copy the ENTIRE original file to your output
+Step 5: Change ONLY the broken token(s) — nothing else
+
+## THE ORIGINAL FILE (PRESERVE THIS — only fix the broken parts):
+```
+{old_content[:5000]}
+```
+
+## THE ERROR TO FIX:
+{last_error}
+
+Now provide the file with ONLY the syntax error fixed. Your output must be
+almost identical to the original — same length, same structure, same content.
+
+**File: {filepath}**
+```
+[The original code above with ONLY the error-causing token(s) corrected]
+```
+"""
+                        print("   Re-prompting Gemini with rejection feedback...")
+                        current_fix_plan = await generate_with_retry(retry_prompt)
+                        parsed_fix = parse_fix_from_response(current_fix_plan)
+                        if not parsed_fix['files']:
+                            print("   Could not parse new fix from Gemini response")
+                        continue  
                     
                     # Step 3: Re-run the test command to verify
-                    # Use parsed verification command, or fall back to original test_command
+                 
                     verify_cmd = parsed_fix.get('verification_command') or test_command
-                    print(f"   🧪 Verifying fix with: {verify_cmd}")
-                    await emit(run_id, EventType.VERIFYING, "🧪 Running Verification", f"Command: {verify_cmd[:60]}...")
+                    print(f"   Verifying fix with: {verify_cmd}")
+                    await emit(run_id, EventType.VERIFYING, "Running Verification", f"Command: {verify_cmd[:60]}...")
                     
                     verify_result = box.run_command(f"cd {work_dir} && {verify_cmd}")
                     
@@ -874,26 +1144,26 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
                     full_output = verify_result['stdout'] + "\n" + verify_result['stderr']
                     
                     if verify_result['exit_code'] == 0:
-                        print("   ✅ VERIFICATION PASSED! Fix is valid.")
-                        await emit(run_id, EventType.SUCCESS, "✅ Verification Passed!", "The fix has been validated successfully")
+                        print("   VERIFICATION PASSED! Fix is valid.")
+                        await emit(run_id, EventType.SUCCESS, "Verification Passed!", "The fix has been validated successfully")
                         verification_passed = True
                         break
                     else:
                         last_error = full_output
-                        print(f"   ❌ Verification failed!")
-                        print(f"   📋 Full error output:")
+                        print(f"   Verification failed!")
+                        print(f"   Full error output:")
                         print(f"   {full_output[:500]}")  # Show first 500 chars of error
                         
-                        await emit(run_id, EventType.RETRY, f"❌ Attempt {attempt + 1} Failed", 
+                        await emit(run_id, EventType.RETRY, f"Attempt {attempt + 1} Failed", 
                                   f"Error: {full_output[:200]}...")
                         
                         if attempt < max_retries - 1:
-                            print("   🔄 Feeding error back to Gemini for retry...")
-                            await emit(run_id, EventType.THINKING, "🔄 Re-analyzing with new error", 
+                            print("   Feeding error back to Gemini for retry...")
+                            await emit(run_id, EventType.THINKING, "Re-analyzing with new error", 
                                       "Gemini is learning from the failure...")
                             
                             # Build retry prompt with the NEW error
-                            retry_prompt = f"""Your previous fix attempt FAILED verification.
+                            retry_prompt = f"""Your previous fix attempt FAILED verification. A NEW error appeared.
 
 ## PREVIOUS FIX ATTEMPT:
 {current_fix_plan[:2000]}
@@ -903,8 +1173,13 @@ async def run_healing_mission(payload: dict, run_id: str | None = None):
 {last_error[:2000]}
 ```
 
-The original syntax errors may be fixed, but there is a NEW error now. 
-You must address THIS new error, not the original one.
+CRITICAL REMINDER — SURGICAL FIXES ONLY:
+- Fix ONLY the specific error shown above
+- Do NOT rewrite, reorganize, or "improve" any code
+- Do NOT change lines that are not causing the error
+- Do NOT replace the user's custom code with templates or boilerplate
+- Your output must be the SAME code with ONLY the broken token(s) fixed
+- The file length must stay approximately the same as the original
 
 ## REACT COMPILER / PURITY RULES (if applicable):
 If the error mentions "impure function" or "Cannot call impure function during render":
@@ -940,76 +1215,506 @@ export default function Home() {{
 3. Add 'use client' directive at top
 4. Show loading state while value is null
 5. NEVER just delete functionality - always preserve the original behavior
-6. MINIMAL CHANGES ONLY - do NOT modify text content or UI copy!
+6. MINIMAL CHANGES ONLY - do NOT modify text content, strings, or UI copy!
    - If original has <p>Lucky Number!</p> → keep EXACTLY <p>Lucky Number!</p>
-   - If original has <p>Try again.</p> → keep EXACTLY <p>Try again.</p>
-   - ONLY change the code structure, NOT the content/strings
+   - ONLY change the code structure needed to fix the error, NOT the content
 
 Please provide a COMPLETE corrected file that fixes THIS new error.
-IMPORTANT: Keep all original text/strings EXACTLY as they were!
-
-Use the exact same format as before with the code block labeled with the file path.
+Keep all original text/strings/structure EXACTLY as they were.
 
 **File: [exact/path/to/file.ext]**
 ```language
-// complete fixed code here
+// complete fixed code here — same as original with only the error fixed
 ```
 
-## 🧪 VERIFICATION COMMAND
+##  VERIFICATION COMMAND
 ```bash
 npm run lint
 ```
 """
-                            print("   🤖 Re-prompting Gemini with new error...")
+                            print("   Re-prompting Gemini with new error...")
                             current_fix_plan = await generate_with_retry(retry_prompt)
-                            print(f"   📝 New fix plan received")
+                            print(f"   New fix plan received")
                             
                             # Re-parse the new fix
                             parsed_fix = parse_fix_from_response(current_fix_plan)
                             if not parsed_fix['files']:
-                                print("   ⚠️ Could not parse new fix from Gemini response")
+                                print("   Could not parse new fix from Gemini response")
                                 break
                 
-                # ============================================================
-                # PHASE F: PR CREATION (Guide Section 2.2 - The Action Phase)
-                # ============================================================
-                if verification_passed:
-                    print("🔀 TALOS: PR Creation (Phase F)")
-                    await emit(run_id, EventType.CREATING_PR, "🔀 Checking for existing PRs", "Avoiding duplicate fixes...")
+                if verification_passed and project_type == "nodejs":
+                    print("📸 TALOS: Visual Cortex Activation")
+                    await emit(run_id, EventType.ANALYZING, "Activating Visual Cortex", 
+                              "Preparing screenshot capture of the fixed UI...")
                     
-                    # DUPLICATE PR CHECK: Don't create PR if one already exists
+                    server_handle = None  # Track background server for cleanup
+                    
+                    try:
+                        # First, check Node.js version - Vite requires 20.19+ or 22.12+
+                        node_version_check = box.run_command("node --version")
+                        node_version = node_version_check.get('stdout', '').strip()
+                        print(f"   Node.js version: {node_version}")
+                        
+                        # Parse version (e.g., "v20.9.0" -> (20, 9, 0))
+                        use_build_fallback = False
+                        needs_upgrade = False
+                        try:
+                            import re
+                            version_match = re.match(r'v?(\d+)\.(\d+)\.(\d+)', node_version)
+                            if version_match:
+                                major, minor = int(version_match.group(1)), int(version_match.group(2))
+                                if major < 20 or (major == 20 and minor < 19) or (major == 21) or (major == 22 and minor < 12):
+                                    print(f"   Node.js {node_version} too old for Vite dev server")
+                                    needs_upgrade = True
+                        except Exception as e:
+                            print(f"   Could not parse Node version: {e}")
+                        
+                        # Upgrade Node.js if version is too old (instead of using build fallback)
+                        if needs_upgrade:
+                            print("   Upgrading Node.js to latest LTS...")
+                            await emit(run_id, EventType.ANALYZING, "Upgrading Node.js", 
+                                      f"Current {node_version} is too old, installing v22 LTS...")
+                            
+                            # Use 'n' package to upgrade Node.js (simpler than nvm in scripts)
+                            upgrade_result = box.run_command(
+                                "npm install -g n && n 22 && hash -r",
+                                timeout=120
+                            )
+                            upgrade_out = upgrade_result.get('stdout', '') + upgrade_result.get('stderr', '')
+                            print(f"   Upgrade output: {upgrade_out[:300]}")
+                            
+                            # Verify upgrade worked
+                            new_version_check = box.run_command("/usr/local/bin/node --version || node --version")
+                            new_version = new_version_check.get('stdout', '').strip()
+                            print(f"   New Node.js version: {new_version}")
+                            
+                            # Check if upgrade succeeded
+                            new_match = re.match(r'v?(\d+)', new_version)
+                            if new_match and int(new_match.group(1)) >= 22:
+                                print(f"   Node.js upgraded to {new_version}")
+                                await emit(run_id, EventType.ANALYZING, "Node.js Upgraded", 
+                                          f"Now running {new_version}")
+                                # Update PATH to use the new node
+                                box.run_command("export PATH=/usr/local/bin:$PATH", timeout=5)
+                                use_build_fallback = False
+                            else:
+                                print(f"   Upgrade failed, using build fallback")
+                                use_build_fallback = True
+                        
+                        # Install Playwright (--with-deps gets system libs like libX11)
+                        await emit(run_id, EventType.ANALYZING, "Installing Playwright", 
+                                  "Installing Chromium browser for screenshots (30-60s)...")
+                        
+                       
+                        # Step 1: Install the Python package
+                        pip_result = box.run_command("python3 -m pip install playwright", timeout=60)
+                        print(f"   pip install playwright: exit {pip_result['exit_code']}")
+                        pip_out = pip_result.get('stdout', '') + pip_result.get('stderr', '')
+                        print(f"   pip output: {pip_out[:200]}")
+                        if pip_result['exit_code'] != 0:
+                            await emit(run_id, EventType.ANALYZING, "Skipping Visual Capture", 
+                                      "pip install playwright failed")
+                            raise Exception(f"pip install playwright failed: {pip_out[:100]}")
+                        
+                        # Step 2: Install Chromium + system deps (apt packages)
+                        browser_result = box.run_command(
+                            "python3 -m playwright install --with-deps chromium",
+                            timeout=120
+                        )
+                        browser_out = browser_result.get('stdout', '') + browser_result.get('stderr', '')
+                        print(f"   playwright install chromium: exit {browser_result['exit_code']}")
+                        print(f"   browser output: {browser_out[:300]}")
+                        if browser_result['exit_code'] != 0:
+                            await emit(run_id, EventType.ANALYZING, "Skipping Visual Capture", 
+                                      f"Chromium install failed: {browser_out[:80]}")
+                            raise Exception(f"playwright install chromium failed: {browser_out[:100]}")
+                        
+                        # Step 3: Verify chromium is actually usable
+                        chrome_check = box.run_command(
+                            "find /root/.cache/ms-playwright /home/*/.cache/ms-playwright -name 'chrome' -type f 2>/dev/null | head -1 || echo 'NO_BROWSER_FOUND'",
+                            timeout=10
+                        )
+                        chrome_path = chrome_check.get('stdout', '').strip()
+                        print(f"   Chromium binary: {chrome_path[:200]}")
+                        if 'NO_BROWSER_FOUND' in chrome_path or not chrome_path:
+                            print("   Chromium binary not found after install!")
+                            # Don't fail here — Playwright might find it via its own path resolution
+                        
+                        await emit(run_id, EventType.ANALYZING, "Playwright Installed", 
+                                  "Browser ready. Starting application server...")
+                        
+                        # Write the capture script
+                        box.write_file("visual_capture.py", get_playwright_setup_script())
+                        
+                      
+                        shm_fix = box.run_command(
+                            "mount -o remount,size=256m /dev/shm 2>/dev/null && echo 'SHM_RESIZED' || echo 'SHM_RESIZE_FAILED'",
+                            timeout=5
+                        )
+                        shm_status = shm_fix.get('stdout', '').strip()
+                        print(f"   /dev/shm resize: {shm_status}")
+                       
+                        box.run_command("pkill -9 -f 'chrome' 2>/dev/null; pkill -9 -f 'chromium' 2>/dev/null; true", timeout=5)
+                        
+                        dev_server_url = None
+                        
+                        if use_build_fallback:
+                         
+                            print("   Build + serve fallback for older Node.js...")
+                            await emit(run_id, EventType.ANALYZING, "Building App", 
+                                      f"Node.js {node_version} is too old for dev server, building static files...")
+                            
+                            build_result = box.run_command(f"cd {work_dir} && npm run build 2>&1", timeout=120)
+                            build_output = build_result.get('stdout', '') + build_result.get('stderr', '')
+                            build_exit = build_result.get('exit_code', 1)
+                            print(f"   Build exit code: {build_exit}")
+                            
+                            if build_exit == 0:
+                                # Find build output directory
+                                build_dir = None
+                                for dir_name in ["dist", "build", "out"]:
+                                    check = box.run_command(f"test -d {work_dir}/{dir_name} && echo 'exists'")
+                                    if "exists" in check.get('stdout', ''):
+                                        build_dir = dir_name
+                                        break
+                                
+                                if build_dir:
+                                    print(f"   Found build directory: {build_dir}")
+                                    await emit(run_id, EventType.ANALYZING, "Starting Static Server", 
+                                              f"Serving {build_dir}/ on port 3000...")
+                                    
+                                    box.run_command("npm install -g serve 2>&1 || true", timeout=30)
+                                    
+                                    
+                                    server_handle = box.run_background(
+                                        f"npx serve -s {work_dir}/{build_dir} -p 3000"
+                                    )
+                                    
+                                    if not server_handle:
+                                        print("   Failed to start serve in background")
+                                        await emit(run_id, EventType.ANALYZING, "⏭Skipping Visual Capture", 
+                                                  "Could not start static file server")
+                                        raise Exception("run_background failed for serve")
+                                    
+                                    
+                                    for attempt in range(5):
+                                        await asyncio.sleep(2)
+                                        curl_check = box.run_command(
+                                            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 http://localhost:3000 2>/dev/null || echo 'failed'",
+                                            timeout=10
+                                        )
+                                        http_code = curl_check.get('stdout', '').strip()
+                                        if http_code in ['200', '304', '301', '302']:
+                                            dev_server_url = "http://localhost:3000"
+                                            print(f"   Serve running on {dev_server_url}")
+                                            break
+                                        print(f"   Waiting for serve ({attempt + 1}/5)...")
+                                else:
+                                    print("   No build output directory found")
+                                    await emit(run_id, EventType.ANALYZING, "Skipping Visual Capture", 
+                                              "Build succeeded but no output directory found")
+                            else:
+                                if "Node.js version" in build_output:
+                                    await emit(run_id, EventType.ANALYZING, "Skipping Visual Capture", 
+                                              f"Build also requires newer Node.js (have {node_version})")
+                                else:
+                                    await emit(run_id, EventType.ANALYZING, "Skipping Visual Capture", 
+                                              "Build failed - visual analysis skipped")
+                        else:
+             
+                            print("   Starting dev server (background)...")
+                            await emit(run_id, EventType.ANALYZING, "Starting Dev Server", 
+                                      "Launching dev server for visual capture...")
+                            
+                            # USE E2B NATIVE BACKGROUND — returns instantly!
+                            server_handle = box.run_background(
+                                f"cd {work_dir} && npm run dev -- --host 0.0.0.0"
+                            )
+                            
+                            if not server_handle:
+                                print("   Failed to start dev server in background")
+                                await emit(run_id, EventType.ANALYZING, "Skipping Visual Capture", 
+                                          "Could not start dev server")
+                                raise Exception("run_background failed for dev server")
+                            
+                           
+                            for attempt in range(10):
+                                await asyncio.sleep(2)
+                                print(f"   Checking for dev server ({attempt + 1}/10)...")
+                                
+                                
+                                for port in ["5173", "3000", "8080", "4173"]:
+                                    curl_check = box.run_command(
+                                        f"curl -s -o /dev/null -w '%{{http_code}}' --connect-timeout 2 http://localhost:{port} 2>/dev/null || echo 'failed'",
+                                        timeout=10
+                                    )
+                                    http_code = curl_check.get('stdout', '').strip()
+                                    if http_code in ['200', '304', '301', '302']:
+                                        dev_server_url = f"http://localhost:{port}"
+                                        print(f"   Dev server on port {port}")
+                                        break
+                                
+                                if dev_server_url:
+                                    break
+                      
+                        if dev_server_url:
+                            print(f"   Capturing screenshot from {dev_server_url}...")
+                            await emit(run_id, EventType.ANALYZING, "Capturing Screenshot", 
+                                      f"Taking screenshot of {dev_server_url}...")
+                           
+                            capture_result = box.run_command(
+                                f"ulimit -c 0 && python3 -u visual_capture.py --url '{dev_server_url}' --width 1280 --height 720",
+                                timeout=180  
+                            )
+                           
+                            capture_log_from_file = ""
+                            try:
+                                log_file_result = box.run_command("cat /tmp/visual_capture.log 2>/dev/null || echo ''", timeout=5)
+                                capture_log_from_file = log_file_result.get('stdout', '').strip()
+                            except Exception:
+                                pass
+                            
+                            capture_stderr = capture_result.get('stderr', '')
+                            
+                          
+                            effective_log = capture_log_from_file or capture_stderr
+                            if effective_log:
+                                print(f"   Capture log:\n{effective_log[:1000]}")
+                            else:
+                                print("   No capture logs found (script may have crashed before logging)")
+                                print(f"   Raw stdout: {capture_result.get('stdout', '')[:300]}")
+                                print(f"   Exit code: {capture_result.get('exit_code', 'unknown')}")
+                            
+                  
+                            if effective_log:
+                                log_lines = [l.strip() for l in effective_log.split('\n') if l.strip()]
+                                full_log = ' | '.join(log_lines) if log_lines else 'No log'
+                                await emit(run_id, EventType.ANALYZING, "Capture Log", full_log[:300])
+                                
+                               
+                                try:
+                                    from app.db.supabase import get_healing_run
+                                    current_run = await get_healing_run(run_id)
+                                    if current_run and current_run.metadata:
+                                        updated_metadata = current_run.metadata.copy()
+                                        updated_metadata['visual_capture_log'] = effective_log[:10000]  
+                                        updated_metadata['screenshot_captured'] = False
+                                        await update_healing_run(run_id, metadata=updated_metadata)
+                                except Exception:
+                                    pass
+                            
+                            try:
+                                import json
+                                capture_data = json.loads(capture_result['stdout'])
+                                
+                                if capture_data.get("success") and capture_data.get("screenshot_base64"):
+                                    screenshot_b64 = capture_data["screenshot_base64"]
+                                    print(f"   Screenshot captured! ({len(screenshot_b64)} bytes)")
+                                    
+                                    # Store success in metadata
+                                    try:
+                                        from app.db.supabase import get_healing_run
+                                        current_run = await get_healing_run(run_id)
+                                        if current_run and current_run.metadata:
+                                            updated_metadata = current_run.metadata.copy()
+                                            updated_metadata['visual_capture_log'] = effective_log[:10000]
+                                            updated_metadata['screenshot_captured'] = True
+                                            updated_metadata['screenshot_size_bytes'] = len(screenshot_b64)
+                                            await update_healing_run(run_id, metadata=updated_metadata)
+                                    except Exception:
+                                        pass
+                                    
+                                    await emit_screenshot(
+                                        run_id, "Fixed UI Preview", screenshot_b64,
+                                        f"Screenshot of {dev_server_url} after applying fix"
+                                    )
+                                    
+                                    # Analyze with Gemini Vision
+                                    print("   Analyzing with Gemini Vision...")
+                                    await emit(run_id, EventType.ANALYZING, "Visual Analysis", 
+                                              "Gemini Vision is checking for UI issues...")
+                                    
+                                    visual_report = await analyze_screenshot_with_gemini(
+                                        screenshot_base64=screenshot_b64,
+                                        context="This is the UI after applying a code fix",
+                                        error_description="Checking if the fix resolved the visual issue"
+                                    )
+                                    
+                                    await emit_visual_analysis(run_id, {
+                                        "has_issues": visual_report.has_issues,
+                                        "issues": visual_report.issues,
+                                        "screenshot_description": visual_report.screenshot_description,
+                                        "suggested_fixes": visual_report.suggested_fixes,
+                                        "confidence": visual_report.confidence
+                                    })
+                                    
+                                    if visual_report.has_issues:
+                                        print(f"   Visual issues: {len(visual_report.issues)}")
+                                    else:
+                                        print("   No visual issues detected!")
+                                else:
+                                    error = capture_data.get('error', 'Unknown error')
+                                    print(f"   ⚠️ Python script failed: {error}")
+                                    
+                                    # FALLBACK: Try simpler screenshot method
+                                    print("   🔄 Trying simpler screenshot method...")
+                                    await emit(run_id, EventType.ANALYZING, "Fallback Screenshot", 
+                                              "Python script failed, trying fallback...")
+                                    
+                                    fallback_bytes = box.capture_screenshot_simple(dev_server_url)
+                                    if fallback_bytes:
+                                        import base64
+                                        screenshot_b64 = base64.b64encode(fallback_bytes).decode('utf-8')
+                                        print(f"   ✅ Fallback screenshot captured! ({len(screenshot_b64)} bytes)")
+                                        
+                                        await emit_screenshot(
+                                            run_id, "Fixed UI Preview (Fallback)", screenshot_b64,
+                                            f"Screenshot via fallback after Python script failed"
+                                        )
+                                        
+                                        # Analyze with Gemini Vision
+                                        visual_report = await analyze_screenshot_with_gemini(
+                                            screenshot_base64=screenshot_b64,
+                                            context="This is the UI after applying a code fix",
+                                            error_description="Checking if the fix resolved the visual issue"
+                                        )
+                                        
+                                        await emit_visual_analysis(run_id, {
+                                            "has_issues": visual_report.has_issues,
+                                            "issues": visual_report.issues,
+                                            "screenshot_description": visual_report.screenshot_description,
+                                            "suggested_fixes": visual_report.suggested_fixes,
+                                            "confidence": visual_report.confidence
+                                        })
+                                    else:
+                                        print("   ❌ Fallback also failed")
+                                        await emit(run_id, EventType.ANALYZING, "Screenshot Failed", 
+                                                  f"Both methods failed: {error[:80]}")
+                                    
+                            except (json.JSONDecodeError, ValueError):
+                                
+                                error_output = capture_log_from_file or (capture_result.get('stdout', '') + capture_result.get('stderr', ''))
+                                print(f"   ⚠️ Capture script error: {error_output[:300]}")
+                                
+                                # FALLBACK: Try simpler screenshot method using E2B SDK file reading
+                                print("   🔄 Trying simpler screenshot method...")
+                                await emit(run_id, EventType.ANALYZING, "Fallback Screenshot", 
+                                          "Trying simpler capture method...")
+                                
+                                fallback_bytes = box.capture_screenshot_simple(dev_server_url)
+                                if fallback_bytes:
+                                    import base64
+                                    screenshot_b64 = base64.b64encode(fallback_bytes).decode('utf-8')
+                                    print(f"   ✅ Fallback screenshot captured! ({len(screenshot_b64)} bytes)")
+                                    
+                                    try:
+                                        from app.db.supabase import get_healing_run
+                                        current_run = await get_healing_run(run_id)
+                                        if current_run and current_run.metadata:
+                                            updated_metadata = current_run.metadata.copy()
+                                            updated_metadata['screenshot_captured'] = True
+                                            updated_metadata['screenshot_method'] = 'fallback_simple'
+                                            updated_metadata['screenshot_size_bytes'] = len(screenshot_b64)
+                                            await update_healing_run(run_id, metadata=updated_metadata)
+                                    except Exception:
+                                        pass
+                                    
+                                    await emit_screenshot(
+                                        run_id, "Fixed UI Preview (Fallback)", screenshot_b64,
+                                        f"Screenshot of {dev_server_url} via fallback method"
+                                    )
+                                    
+                                    # Analyze with Gemini Vision
+                                    print("   🔍 Analyzing with Gemini Vision...")
+                                    await emit(run_id, EventType.ANALYZING, "Visual Analysis", 
+                                              "Gemini Vision is checking for UI issues...")
+                                    
+                                    visual_report = await analyze_screenshot_with_gemini(
+                                        screenshot_base64=screenshot_b64,
+                                        context="This is the UI after applying a code fix",
+                                        error_description="Checking if the fix resolved the visual issue"
+                                    )
+                                    
+                                    await emit_visual_analysis(run_id, {
+                                        "has_issues": visual_report.has_issues,
+                                        "issues": visual_report.issues,
+                                        "screenshot_description": visual_report.screenshot_description,
+                                        "suggested_fixes": visual_report.suggested_fixes,
+                                        "confidence": visual_report.confidence
+                                    })
+                                else:
+                                    print("   ❌ Fallback screenshot also failed")
+                                    error_lines = [l for l in error_output.split('\n') if 'Error' in l or 'error' in l or 'FAIL' in l]
+                                    error_msg = error_lines[-1][:100] if error_lines else "All capture methods failed"
+                          
+                                    try:
+                                        from app.db.supabase import get_healing_run
+                                        current_run = await get_healing_run(run_id)
+                                        if current_run and current_run.metadata:
+                                            updated_metadata = current_run.metadata.copy()
+                                            updated_metadata['visual_capture_log'] = error_output[:10000]
+                                            updated_metadata['screenshot_captured'] = False
+                                            updated_metadata['screenshot_error'] = "Both methods failed"
+                                            await update_healing_run(run_id, metadata=updated_metadata)
+                                    except Exception:
+                                        pass
+                                
+                                    await emit(run_id, EventType.ANALYZING, "Screenshot Failed", error_msg)
+                        else:
+                            print("   Server not detected, skipping visual capture")
+                            await emit(run_id, EventType.ANALYZING, "⏭Skipping Visual Capture", 
+                                      "Server didn't start in time")
+                        
+                    except Exception as e:
+                        print(f"   Visual Cortex error: {type(e).__name__}: {e}")
+                        await emit(run_id, EventType.ANALYZING, "Visual Capture Skipped", 
+                                  f"{type(e).__name__}: {str(e)[:80]}")
+                    finally:
+                        
+                        if server_handle:
+                            print("   Killing background server...")
+                            box.kill_background(server_handle)
+                       
+                        box.run_command("pkill -f 'node' 2>/dev/null; pkill -f 'serve' 2>/dev/null; true", timeout=5)
+                
+            
+                if verification_passed:
+                    print("TALOS: PR Creation (Phase F)")
+                    await emit(run_id, EventType.CREATING_PR, "Checking for existing PRs", "Avoiding duplicate fixes...")
+                    
+                    
                     existing_pr = await check_existing_talos_pr(token, repo_full_name)
                     
                     if existing_pr:
-                        print(f"   ⏭️ Skipping PR creation - existing TALOS PR found: #{existing_pr['number']}")
-                        await emit(run_id, EventType.SUCCESS, "⏭️ Fix Already Pending", 
+                        print(f"   Skipping PR creation - existing TALOS PR found: #{existing_pr['number']}")
+                        await emit(run_id, EventType.SUCCESS, "Fix Already Pending", 
                                   f"An existing TALOS PR is waiting to be merged: #{existing_pr['number']}",
                                   metadata={
                                       "existing_pr_url": existing_pr['url'],
                                       "existing_pr_number": existing_pr['number'],
                                       "reason": "duplicate_prevention"
                                   })
-                        await emit(run_id, EventType.MISSION_END, "🏁 No New PR Needed", 
+                        await emit(run_id, EventType.MISSION_END, "No New PR Needed", 
                                   f"Merge the existing PR first: {existing_pr['url']}",
                                   metadata={"status": "skipped", "existing_pr": existing_pr['url']})
                         await update_healing_run(run_id, status="success", pr_url=existing_pr['url'])
-                        return  # Exit early - don't create duplicate PR
+                        return  
                     
-                    await emit(run_id, EventType.CREATING_PR, "🔀 Creating Pull Request", "Pushing verified fix to GitHub...")
+                    await emit(run_id, EventType.CREATING_PR, "Creating Pull Request", "Pushing verified fix to GitHub...")
                     
                     import time
                     branch_name = f"fix/talos-{int(time.time())}"
                     
                     # Step 1: Create branch
                     if box.create_branch(branch_name):
-                        print(f"   🌿 Created branch: {branch_name}")
-                        await emit(run_id, EventType.CREATING_PR, f"🌿 Branch Created: {branch_name}", "Committing changes...")
+                        print(f"   Created branch: {branch_name}")
+                        await emit(run_id, EventType.CREATING_PR, f"Branch Created: {branch_name}", "Committing changes...")
                         
                         # Step 2: Commit and push
                         commit_message = parsed_fix.get('pr_title', 'fix: Auto-healing by TALOS agent')
                         if box.commit_and_push(commit_message, branch_name):
-                            print(f"   📤 Pushed to remote")
-                            await emit(run_id, EventType.CREATING_PR, "📤 Pushed to Remote", "Opening Pull Request...")
+                            print(f"   Pushed to remote")
+                            await emit(run_id, EventType.CREATING_PR, "Pushed to Remote", "Opening Pull Request...")
                             
                             # Step 3: Create PR via GitHub API
                             pr_result = await create_pull_request(
@@ -1021,48 +1726,52 @@ npm run lint
                             )
                             
                             if pr_result:
-                                print(f"   🎉 PR Created: {pr_result}")
-                                # 🎬 FINAL SUCCESS BROADCAST
-                                await emit(run_id, EventType.SUCCESS, "🎉 Mission Complete!", 
+                                print(f"   PR Created: {pr_result}")
+                              
+                                await emit(run_id, EventType.SUCCESS, "Mission Complete!", 
                                           f"Pull Request created successfully",
                                           metadata={"pr_url": pr_result, "branch": branch_name})
-                                await emit(run_id, EventType.MISSION_END, "🏁 Healing Complete", 
+                                await emit(run_id, EventType.MISSION_END, "Healing Complete", 
                                           f"PR: {pr_result}",
                                           metadata={"pr_url": pr_result, "status": "success"})
                                 await update_healing_run(run_id, status="success", pr_url=pr_result)
                             else:
-                                print("   ⚠️ PR creation failed (see logs)")
-                                await emit(run_id, EventType.FAILURE, "⚠️ PR Creation Failed", 
+                                print("   PR creation failed (see logs)")
+                                await emit(run_id, EventType.FAILURE, "PR Creation Failed", 
                                           "Fix was verified but PR could not be created")
+                                await emit(run_id, EventType.MISSION_END, "Healing Complete", 
+                                          "PR creation failed - check GitHub API permissions",
+                                          metadata={"status": "failure", "reason": "pr_creation_failed"})
+                                await update_healing_run(run_id, status="failure", error_type="pr_creation_failed")
                         else:
-                            print("   ❌ Failed to push changes")
-                            await emit(run_id, EventType.FAILURE, "❌ Push Failed", "Could not push to remote")
+                            print("   Failed to push changes")
+                            await emit(run_id, EventType.FAILURE, "Push Failed", "Could not push to remote")
                     else:
-                        print("   ❌ Failed to create branch")
-                        await emit(run_id, EventType.FAILURE, "❌ Branch Creation Failed", "Could not create fix branch")
+                        print("   Failed to create branch")
+                        await emit(run_id, EventType.FAILURE, "Branch Creation Failed", "Could not create fix branch")
                 else:
-                    print("   ⚠️ Verification failed after all retries. No PR created.")
-                    print("   🎯 Human intervention required.")
-                    await emit(run_id, EventType.FAILURE, "⚠️ Verification Failed", 
+                    print("   Verification failed after all retries. No PR created.")
+                    print("   Human intervention required.")
+                    await emit(run_id, EventType.FAILURE, "Verification Failed", 
                               "All retry attempts exhausted. Human intervention required.",
                               metadata={"last_error": last_error[:500], "attempts": max_retries})
-                    await emit(run_id, EventType.MISSION_END, "🏁 Mission Incomplete", 
+                    await emit(run_id, EventType.MISSION_END, "Mission Incomplete", 
                               "Could not verify fix after multiple attempts",
                               metadata={"status": "failed", "reason": "verification_failed"})
                     await update_healing_run(run_id, status="failure", error_type="verification_failed")
             else:
-                print("   ⚠️ Could not parse fix from Gemini response")
-                await emit(run_id, EventType.FAILURE, "⚠️ Parse Error", 
+                print("   Could not parse fix from Gemini response")
+                await emit(run_id, EventType.FAILURE, "Parse Error", 
                           "Could not extract fix from Gemini's response")
-                await emit(run_id, EventType.MISSION_END, "🏁 Mission Incomplete", 
+                await emit(run_id, EventType.MISSION_END, "Mission Incomplete", 
                           "Failed to parse fix from AI response",
                           metadata={"status": "failed", "reason": "parse_error"})
                 await update_healing_run(run_id, status="failure", error_type="parse_error")
 
     except Exception as e:
-        print(f"💀 TALOS DIED: {e}")
-        await emit(run_id, EventType.FAILURE, "💀 Critical Error", str(e)[:500])
-        await emit(run_id, EventType.MISSION_END, "🏁 Mission Failed", 
+        print(f"TALOS DIED: {e}")
+        await emit(run_id, EventType.FAILURE, "Critical Error", str(e)[:500])
+        await emit(run_id, EventType.MISSION_END, "Mission Failed", 
                   f"Unhandled exception: {str(e)[:200]}",
                   metadata={"status": "error", "exception": str(e)[:500]})
         await update_healing_run(run_id, status="failure", error_type="exception")
@@ -1078,11 +1787,11 @@ async def generate_with_retry(prompt: str, context: str = "", thought_signature:
     - Passing them back preserves the model's reasoning state
     - This improves multi-turn debugging conversations
     """
-    max_retries = len(key_rotator.keys) * 2  # Allow more retries for 503s
+    max_retries = len(key_rotator.keys) * 2  
     attempt = 0
     backoff = 5
     
-    # Store thought signature for return
+    
     new_thought_signature = None
 
     while attempt < max_retries:
@@ -1091,19 +1800,18 @@ async def generate_with_retry(prompt: str, context: str = "", thought_signature:
             client = genai.Client(api_key=current_key)
             full_content = f"CONTEXT:\n{context}\n\nTASK:\n{prompt}" if context else prompt
             
-            print(f"🤖 TALOS: Thinking with Key #{key_rotator.current_index + 1}...")
+            print(f"TALOS: Thinking with Key #{key_rotator.current_index + 1}...")
 
-            # Build generation config
+           
             gen_config = types.GenerateContentConfig(
-                temperature=0.2,  # Lower temp for more deterministic fixes
+                temperature=0.2, 
                 top_p=0.95,
             )
             
-            # Include thought signature if available (multi-turn reasoning)
+           
             if thought_signature:
-                print(f"   🧠 Using thought signature for continuity...")
-                # Note: thought_signature handling depends on Gemini SDK version
-                # Some versions use it in config, others in request metadata
+                print(f"   Using thought signature for continuity...")
+               
             
             response = client.models.generate_content(
                 model=MODEL_NAME,
@@ -1111,28 +1819,27 @@ async def generate_with_retry(prompt: str, context: str = "", thought_signature:
                 config=gen_config
             )
             
-            # Try to extract new thought signature from response
-            # (Available in Gemini 3 responses for multi-turn reasoning)
+            
             if hasattr(response, 'thought_signature'):
                 new_thought_signature = response.thought_signature
-                print(f"   🧠 Captured thought signature for future turns")
+                print(f"   Captured thought signature for future turns")
             
-            # Return both the text and signature
+        
             return response.text
 
         except Exception as e:
             error_msg = str(e)
-            print(f"⚠️ GEMINI ERROR on Key #{key_rotator.current_index + 1}: {error_msg}")
+            print(f"GEMINI ERROR on Key #{key_rotator.current_index + 1}: {error_msg}")
             
             if "429" in error_msg or "403" in error_msg:
-                print(f"🛑 Rate limited - switching keys (cooling {backoff}s)...")
+                print(f"Rate limited - switching keys (cooling {backoff}s)...")
                 key_rotator.rotate()
                 attempt += 1
                 await asyncio.sleep(backoff)
             elif "503" in error_msg or "UNAVAILABLE" in error_msg or "overloaded" in error_msg.lower():
-                # Model overloaded - wait and retry with same key
-                backoff = min(backoff * 2, 30)  # Exponential backoff, max 30s
-                print(f"🔄 Model overloaded - waiting {backoff}s before retry...")
+                
+                backoff = min(backoff * 2, 30)  
+                print(f"Model overloaded - waiting {backoff}s before retry...")
                 attempt += 1
                 await asyncio.sleep(backoff)
             else:

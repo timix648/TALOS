@@ -2,17 +2,16 @@ import hmac
 import hashlib
 import json
 import os
-import httpx # Changed from requests to httpx
+import httpx 
 import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# CONFIGURATION
+
 TARGET_URL = "http://localhost:8000/webhook"
 SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")
 
-# 1. The Mock Payload
 payload = {
     "action": "completed",
     "workflow_run": {
@@ -33,9 +32,8 @@ payload = {
 async def send_trigger():
     payload_bytes = json.dumps(payload).encode('utf-8')
 
-    # 2. Sign the payload
     if not SECRET:
-        print("❌ Error: GITHUB_WEBHOOK_SECRET is missing in .env")
+        print("Error: GITHUB_WEBHOOK_SECRET is missing in .env")
         exit(1)
 
     hash_object = hmac.new(
@@ -45,8 +43,7 @@ async def send_trigger():
     )
     signature = f"sha256={hash_object.hexdigest()}"
 
-    # 3. Send the signal
-    print(f"📨 Sending Mock Webhook to {TARGET_URL}...")
+    print(f"Sending Mock Webhook to {TARGET_URL}...")
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -58,10 +55,10 @@ async def send_trigger():
                 },
                 content=payload_bytes
             )
-            print(f"✅ Response: {response.status_code}")
-            print(f"📄 Body: {response.json()}")
+            print(f"Response: {response.status_code}")
+            print(f"Body: {response.json()}")
     except Exception as e:
-        print(f"❌ Connection Failed: {e}")
+        print(f"Connection Failed: {e}")
         print("Make sure the server is running on port 8000!")
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ export default function RepositoriesPage() {
     fetchRepos();
   }, [session]);
 
-  // Toggle watch status
+  
   const toggleWatch = async (repo: Repository) => {
     if (!session?.installation_id) return;
     setUpdating(repo.full_name);
@@ -85,13 +85,13 @@ export default function RepositoriesPage() {
 
     try {
       if (repo.watched) {
-        // Unwatch
+       
         const [owner, name] = repo.full_name.split("/");
         await fetch(`${API_URL}/installations/${session.installation_id}/watch/${owner}/${name}`, {
           method: "DELETE",
         });
       } else {
-        // Watch
+       
         await fetch(`${API_URL}/installations/${session.installation_id}/watch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -103,7 +103,7 @@ export default function RepositoriesPage() {
         });
       }
 
-      // Update local state
+      
       setRepos(repos.map(r => 
         r.full_name === repo.full_name 
           ? { ...r, watched: !r.watched, auto_heal_enabled: !r.watched }
@@ -116,7 +116,7 @@ export default function RepositoriesPage() {
     }
   };
 
-  // Filter repos
+  
   const filteredRepos = repos.filter(repo => {
     const matchesFilter = 
       filter === "all" ? true :
@@ -133,7 +133,7 @@ export default function RepositoriesPage() {
 
   const watchedCount = repos.filter(r => r.watched).length;
 
-  // Not logged in state
+ 
   if (!loading && !session?.logged_in) {
     return (
       <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6">
@@ -142,7 +142,7 @@ export default function RepositoriesPage() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center max-w-md"
         >
-          <div className="text-6xl mb-6">🔐</div>
+          <div className="text-6xl mb-6"> </div>
           <h1 className="text-2xl font-bold mb-4">Sign In Required</h1>
           <p className="text-gray-400 mb-8">
             Sign in with GitHub to view and manage your repositories.
@@ -159,7 +159,7 @@ export default function RepositoriesPage() {
     );
   }
 
-  // Logged in but no installation
+  
   if (!loading && session?.logged_in && !session.has_installation) {
     return (
       <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6">
@@ -168,7 +168,7 @@ export default function RepositoriesPage() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center max-w-md"
         >
-          <div className="text-6xl mb-6">🔗</div>
+          <div className="text-6xl mb-6"> </div>
           <h1 className="text-2xl font-bold mb-4">Install TALOS App</h1>
           <p className="text-gray-400 mb-8">
             You're signed in as <strong>@{session.user?.login}</strong>. Now install the TALOS GitHub App to give it access to your repositories.
@@ -177,7 +177,7 @@ export default function RepositoriesPage() {
             href={GITHUB_APP_URL}
             className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-600 rounded-xl font-bold hover:opacity-90 transition-all"
           >
-            🔗 Install TALOS App
+            Install TALOS App
           </a>
           <p className="text-gray-500 text-sm mt-4">
             After installing, refresh this page.
@@ -189,13 +189,13 @@ export default function RepositoriesPage() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
-      {/* Header */}
+    
       <nav className="sticky top-0 z-50 backdrop-blur-md bg-gray-950/80 border-b border-gray-800">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
-                <span className="text-sm">🧬</span>
+              <div className="w-8 h-8 rounded-lg overflow-hidden">
+                <img src="/talos-logo.png" alt="TALOS" className="w-full h-full object-cover" />
               </div>
               <span className="font-bold">TALOS</span>
             </Link>
@@ -217,7 +217,7 @@ export default function RepositoriesPage() {
       </nav>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Title & Stats */}
+       
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-bold">Your Repositories</h1>
@@ -234,10 +234,10 @@ export default function RepositoriesPage() {
           </Link>
         </div>
 
-        {/* Search & Filter */}
+       
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="relative flex-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">🔍</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"> </span>
             <input
               type="text"
               placeholder="Search repositories..."
@@ -258,13 +258,13 @@ export default function RepositoriesPage() {
                     : "bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-600"
                 }`}
               >
-                {f === "all" ? "All" : f === "watched" ? "Watching" : "⏸Not Watching"}
+                {f === "all" ? "All" : f === "watched" ? "Watching" : "Not Watching"}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Loading */}
+      
         {loading && (
           <div className="flex items-center justify-center py-20">
             <motion.div
@@ -275,7 +275,7 @@ export default function RepositoriesPage() {
           </div>
         )}
 
-        {/* Repo List */}
+        
         {!loading && (
           <div className="space-y-3">
             <AnimatePresence mode="popLayout">
@@ -295,7 +295,7 @@ export default function RepositoriesPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-lg">{repo.private ? "🔒" : "📂"}</span>
+                        <span className="text-lg">{repo.private ? " " : " "}</span>
                         <a 
                           href={`https://github.com/${repo.full_name}`}
                           target="_blank"
@@ -314,7 +314,7 @@ export default function RepositoriesPage() {
                         <p className="text-sm text-gray-500 mt-1 truncate">{repo.description}</p>
                       )}
                       <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                        <span>📌 {repo.default_branch}</span>
+                        <span>{repo.default_branch}</span>
                         {repo.watched && repo.safe_mode && (
                           <span className="text-green-400">Safe Mode</span>
                         )}
@@ -336,7 +336,7 @@ export default function RepositoriesPage() {
                           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                           className="inline-block"
                         >
-                          ⏳
+                          
                         </motion.span>
                       ) : repo.watched ? (
                         "Stop Watching"
@@ -351,16 +351,16 @@ export default function RepositoriesPage() {
 
             {filteredRepos.length === 0 && !loading && (
               <div className="text-center py-20 text-gray-500">
-                <div className="text-4xl mb-4">📭</div>
+                <div className="text-4xl mb-4"> </div>
                 <p>No repositories match your filter</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Info Footer */}
+        
         <div className="mt-12 p-4 bg-gray-800/50 border border-gray-700 rounded-xl">
-          <h3 className="font-medium mb-2">💡 How it works</h3>
+          <h3 className="font-medium mb-2">How it works</h3>
           <ul className="text-sm text-gray-400 space-y-1">
             <li>• <strong>Protected repos</strong> are monitored for CI/CD failures</li>
             <li>• When a build fails, TALOS analyzes the error and opens a fix PR</li>

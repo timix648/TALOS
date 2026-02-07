@@ -21,24 +21,18 @@ async def get_stats():
     """
     try:
         supabase = get_supabase()
-        
-        # Get total healing runs
         total_runs = supabase.table("healing_runs").select("id", count="exact").execute()
         total_count = total_runs.count or 0
-        
-        # Get successful runs (status = 'success')
+
         success_runs = supabase.table("healing_runs")\
             .select("id", count="exact")\
             .eq("status", "success")\
             .execute()
         success_count = success_runs.count or 0
-        
-        # Calculate fix rate
+
         fix_rate = round((success_count / total_count * 100) if total_count > 0 else 0, 1)
         
-        # Get average boot time from healing_events (sandbox_ready events)
-        # The metadata JSONB column may contain boot_time_ms
-        avg_boot_time = 150  # Default
+        avg_boot_time = 150  
         try:
             boot_events = supabase.table("healing_events")\
                 .select("metadata")\
@@ -55,18 +49,18 @@ async def get_stats():
             if boot_times:
                 avg_boot_time = round(sum(boot_times) / len(boot_times))
         except Exception:
-            pass  # Use default if healing_events table doesn't exist yet
+            pass  
         
         return {
             "avg_boot_time_ms": avg_boot_time,
             "fix_rate_percent": fix_rate,
             "total_heals": total_count,
             "successful_heals": success_count,
-            "retry_limit": 3,  # This is configured in agent.py
+            "retry_limit": 3,  
         }
     
     except Exception as e:
-        # Return defaults if database not configured yet
+        
         return {
             "avg_boot_time_ms": 150,
             "fix_rate_percent": 0,

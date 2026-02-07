@@ -6,17 +6,14 @@ import httpx
 from email.utils import parsedate_to_datetime
 from dotenv import load_dotenv
 
-# Initialize Logging
 logger = logging.getLogger("autonode.auth")
 logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 
-# Configuration Constants
 GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
 GITHUB_PRIVATE_KEY_PATH = os.getenv("GITHUB_PRIVATE_KEY_PATH")
 
-# Global offset cache
 _CLOCK_SKEW_OFFSET = None
 
 def get_clock_skew_offset() -> int:
@@ -28,7 +25,7 @@ def get_clock_skew_offset() -> int:
         return _CLOCK_SKEW_OFFSET
 
     try:
-        # Ping GitHub to get their server time
+      
         with httpx.Client(timeout=5.0) as client:
             resp = client.get("https://api.github.com")
             
@@ -36,20 +33,20 @@ def get_clock_skew_offset() -> int:
         if not server_date_str:
             return 0
 
-        # Calculate offset: Server Time - Local Time
+       
         server_dt = parsedate_to_datetime(server_date_str)
         server_ts = server_dt.timestamp()
         local_ts = time.time()
 
         _CLOCK_SKEW_OFFSET = int(server_ts - local_ts)
         
-        # LOG THIS SO WE KNOW IT WORKED
-        logger.info(f"⏳ Time Sync: Local={int(local_ts)}, GitHub={int(server_ts)}")
-        logger.info(f"⏳ Applied Offset: {_CLOCK_SKEW_OFFSET} seconds")
+    
+        logger.info(f"Time Sync: Local={int(local_ts)}, GitHub={int(server_ts)}")
+        logger.info(f"Applied Offset: {_CLOCK_SKEW_OFFSET} seconds")
         
         return _CLOCK_SKEW_OFFSET
     except Exception as e:
-        logger.warning(f"⚠️ Could not sync time with GitHub: {e}")
+        logger.warning(f"Could not sync time with GitHub: {e}")
         return 0
 
 def load_private_key() -> bytes:
@@ -60,27 +57,27 @@ def load_private_key() -> bytes:
     key_data = b""
     
     if os.path.exists(clean_path):
-        logger.info(f"✅ Loading private key from file: {clean_path}")
+        logger.info(f"Loading private key from file: {clean_path}")
         with open(clean_path, 'rb') as f:
             key_data = f.read()
         logger.info(f"   Key size: {len(key_data)} bytes")
     else:
-        logger.warning(f"⚠️ Key file not found at: {clean_path}")
+        logger.warning(f"Key file not found at: {clean_path}")
         logger.warning("   Attempting to use path as raw key content...")
         key_data = GITHUB_PRIVATE_KEY_PATH.encode('utf-8')
 
-    # Handle escaped newlines from environment variables
+  
     if b"\\n" in key_data:
         logger.info("   Converting escaped newlines...")
         key_data = key_data.decode('utf-8').replace("\\n", "\n").encode('utf-8')
 
-    # Validate key format
+  
     if not key_data.startswith(b"-----BEGIN"):
-        logger.error("❌ INVALID KEY: Does not start with -----BEGIN")
+        logger.error("INVALID KEY: Does not start with -----BEGIN")
         raise ValueError("Private key has invalid format - must start with -----BEGIN")
     
     if b"-----END" not in key_data:
-        logger.error("❌ INVALID KEY: Missing -----END marker")
+        logger.error("INVALID KEY: Missing -----END marker")
         raise ValueError("Private key has invalid format - missing -----END marker")
 
     return key_data
@@ -90,27 +87,23 @@ def generate_jwt() -> str:
         raise ValueError("GITHUB_APP_ID is missing.")
 
     private_key = load_private_key()
-    
-    # Log the key header for debugging (first 50 chars only)
-    logger.debug(f"🔑 Key starts with: {private_key[:50]}")
 
-    # 1. Get the Time Offset (Fixes the 1-year drift)
+    logger.debug(f"Key starts with: {private_key[:50]}")
+
     offset = get_clock_skew_offset()
     
-    # 2. Calculate "GitHub Time"
-    now_github_time = int(time.time() + offset)
     
-    # CRITICAL: iss must be a string for GitHub API
-    # Some PyJWT versions handle this differently
+    now_github_time = int(time.time() + offset)
+
     app_id_str = str(GITHUB_APP_ID).strip()
     
     payload = {
-        "iat": now_github_time - 60,  # Backdate by 60 seconds for clock skew
-        "exp": now_github_time + (9 * 60),  # Valid for 9 minutes
+        "iat": now_github_time - 60,  
+        "exp": now_github_time + (9 * 60),  
         "iss": app_id_str
     }
     
-    logger.info(f"🎫 JWT Payload: iat={payload['iat']}, exp={payload['exp']}, iss={payload['iss']}")
+    logger.info(f"JWT Payload: iat={payload['iat']}, exp={payload['exp']}, iss={payload['iss']}")
 
     return jwt.encode(payload, private_key, algorithm="RS256")
 
@@ -123,17 +116,36 @@ async def get_installation_access_token(installation_id: int) -> str:
         "X-GitHub-Api-Version": "2022-11-28"
     }
     
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"https://api.github.com/app/installations/{installation_id}/access_tokens", 
-            headers=headers
-        )
-        
-        if resp.status_code == 401:
-            logger.critical(f"Auth Failed (401). Response: {resp.text}")
-            raise Exception("GitHub Authentication Failed: 401 Unauthorized")
+    logger.info(f"Requesting access token for installation: {installation_id}")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"https://api.github.com/app/installations/{installation_id}/access_tokens", 
+                headers=headers
+            )
             
-        if resp.status_code != 201:
-            raise Exception(f"Failed to get access token: {resp.status_code}")
+            logger.info(f"GitHub Response: {resp.status_code}")
             
-        return resp.json()["token"]
+            if resp.status_code == 401:
+                error_body = resp.text
+                logger.critical(f"Auth Failed (401). Response: {error_body}")
+                raise Exception(f"GitHub Authentication Failed: 401 Unauthorized - {error_body}")
+                
+            if resp.status_code != 201:
+                error_body = resp.text
+                logger.error(f"Auth Failed ({resp.status_code}). Response: {error_body}")
+                raise Exception(f"Failed to get access token: {resp.status_code} - {error_body}")
+                
+            return resp.json()["token"]
+    except httpx.TimeoutException:
+        logger.error("GitHub API timeout - request took too long")
+        raise Exception("GitHub API request timed out after 30 seconds")
+    except httpx.ConnectError as e:
+        logger.error(f"Connection error to GitHub: {e}")
+        raise Exception(f"Cannot connect to GitHub API: {e}")
+    except Exception as e:
+        if "401" in str(e) or "Unauthorized" in str(e):
+            raise  
+        logger.error(f"Unexpected error: {type(e).__name__}: {e}")
+        raise

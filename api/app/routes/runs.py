@@ -20,8 +20,6 @@ from app.db.supabase import (
 
 router = APIRouter(prefix="/runs", tags=["Healing Runs"])
 
-
-# Response models
 class RunResponse(BaseModel):
     id: Optional[str]
     run_id: str
@@ -81,7 +79,7 @@ async def list_runs(
             total=len(runs)
         )
     except Exception as e:
-        # If Supabase isn't configured, return empty list
+
         return RunListResponse(runs=[], total=0)
 
 
@@ -120,6 +118,63 @@ async def get_run(run_id: str):
             started_at=run.started_at,
             completed_at=run.completed_at,
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{run_id}/details")
+async def get_run_details(run_id: str):
+    """
+    Get FULL details for a healing run including events, metadata, and logs.
+    Useful for debugging and for extracting info to send to support.
+    
+    Returns:
+        - Basic run info (status, PR URL, etc.)
+        - Full metadata including:
+            * error_message: The original error that triggered healing
+            * clean_error_log: Sanitized build/test error output
+            * diff_content: Git diff of what changed
+            * fix_plan_summary: Gemini's diagnosis and fix plan (first 5KB)
+            * visual_capture_log: Full Playwright/Chromium logs from screenshot attempt (up to 10KB)
+            * screenshot_captured: Whether screenshot succeeded
+            * screenshot_error: Error message if screenshot failed
+        - All events (timeline of what TALOS did)
+    
+    To get visual capture logs:
+        GET http://localhost:8000/runs/{run_id}/details
+        Look for metadata.visual_capture_log
+    """
+    try:
+        run = await get_healing_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        
+       
+        from app.db.supabase import get_supabase
+        supabase = get_supabase()
+        events_result = supabase.table("healing_events")\
+            .select("event_type, title, description, metadata, created_at")\
+            .eq("run_id", run_id)\
+            .order("created_at")\
+            .execute()
+        
+        events = events_result.data or []
+        
+        return {
+            "run_id": run.run_id,
+            "repo_full_name": run.repo_full_name,
+            "status": run.status,
+            "error_type": run.error_type,
+            "patient_zero": run.patient_zero,
+            "pr_url": run.pr_url,
+            "started_at": run.started_at,
+            "completed_at": run.completed_at,
+            "metadata": run.metadata or {},
+            "events": events,
+            "event_count": len(events),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -181,8 +236,7 @@ async def allow_retry(run_id: str):
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
         
-        # Store the retry permission in memory (simple approach)
-        # The agent will check this before skipping
+    
         from app.core.agent import RETRY_ALLOWED_REPOS
         RETRY_ALLOWED_REPOS.add(run.repo_full_name)
         

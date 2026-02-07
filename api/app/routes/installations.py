@@ -47,7 +47,7 @@ async def create_or_update_installation(data: InstallationCreate):
         return result
         
     except Exception as e:
-        print(f"❌ Installation save error: {e}")
+        print(f"Installation save error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -61,10 +61,10 @@ async def sync_installation(installation_id: int):
     import httpx
     
     try:
-        # Get access token for this installation
+        
         token = await get_installation_access_token(installation_id)
         
-        # Fetch accessible repositories
+      
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 "https://api.github.com/installation/repositories",
@@ -80,7 +80,7 @@ async def sync_installation(installation_id: int):
             data = response.json()
             repos = data.get("repositories", [])
             
-            print(f"📦 Found {len(repos)} accessible repositories for installation {installation_id}")
+            print(f"Found {len(repos)} accessible repositories for installation {installation_id}")
             
             return {
                 "installation_id": installation_id,
@@ -96,7 +96,7 @@ async def sync_installation(installation_id: int):
             }
             
     except Exception as e:
-        print(f"❌ Sync error: {e}")
+        print(f"Sync error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -142,14 +142,13 @@ async def list_installation_repos(installation_id: int):
             data = response.json()
             github_repos = data.get("repositories", [])
             
-            # Get watched status from our database
+           
             watched = supabase.table("watched_repos")\
                 .select("repo_full_name, auto_heal_enabled, safe_mode")\
                 .execute()
             
             watched_map = {r["repo_full_name"]: r for r in (watched.data or [])}
             
-            # Merge GitHub repos with our watch status
             repos_with_status = []
             for repo in github_repos:
                 full_name = repo["full_name"]
@@ -171,7 +170,7 @@ async def list_installation_repos(installation_id: int):
             }
             
     except Exception as e:
-        print(f"❌ REPO LIST ERROR: {e}")  # <--- THIS IS THE CRITICAL LINE
+        print(f"REPO LIST ERROR: {e}")  
         raise HTTPException(status_code=500, detail=str(e))
     
     """
@@ -197,14 +196,13 @@ async def list_installation_repos(installation_id: int):
             data = response.json()
             github_repos = data.get("repositories", [])
             
-            # Get watched status from our database
             watched = supabase.table("watched_repos")\
                 .select("repo_full_name, auto_heal_enabled, safe_mode")\
                 .execute()
             
             watched_map = {r["repo_full_name"]: r for r in (watched.data or [])}
             
-            # Merge GitHub repos with our watch status
+
             repos_with_status = []
             for repo in github_repos:
                 full_name = repo["full_name"]
@@ -244,7 +242,7 @@ async def watch_repo(installation_id: int, data: WatchRepoRequest):
     
     try:
         supabase = get_supabase()
-        # Get our internal installation ID
+   
         inst = supabase.table("installations")\
             .select("id")\
             .eq("github_installation_id", installation_id)\
@@ -254,7 +252,7 @@ async def watch_repo(installation_id: int, data: WatchRepoRequest):
         if not inst.data:
             raise HTTPException(status_code=404, detail="Installation not found")
         
-        # Upsert the watched repo
+    
         result = supabase.table("watched_repos").upsert({
             "installation_id": inst.data["id"],
             "repo_full_name": data.repo_full_name,
@@ -262,7 +260,7 @@ async def watch_repo(installation_id: int, data: WatchRepoRequest):
             "safe_mode": data.safe_mode,
         }, on_conflict="installation_id,repo_full_name").execute()
         
-        print(f"👁️ Now watching: {data.repo_full_name}")
+        print(f"Now watching: {data.repo_full_name}")
         
         return {
             "success": True,
@@ -272,7 +270,6 @@ async def watch_repo(installation_id: int, data: WatchRepoRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.delete("/{installation_id}/watch/{repo_owner}/{repo_name}")
 async def unwatch_repo(installation_id: int, repo_owner: str, repo_name: str):
@@ -285,7 +282,7 @@ async def unwatch_repo(installation_id: int, repo_owner: str, repo_name: str):
     
     try:
         supabase = get_supabase()
-        # Get our internal installation ID
+       
         inst = supabase.table("installations")\
             .select("id")\
             .eq("github_installation_id", installation_id)\
@@ -295,14 +292,14 @@ async def unwatch_repo(installation_id: int, repo_owner: str, repo_name: str):
         if not inst.data:
             raise HTTPException(status_code=404, detail="Installation not found")
         
-        # Delete the watch
+        
         supabase.table("watched_repos")\
             .delete()\
             .eq("installation_id", inst.data["id"])\
             .eq("repo_full_name", repo_full_name)\
             .execute()
         
-        print(f"🚫 Stopped watching: {repo_full_name}")
+        print(f"Stopped watching: {repo_full_name}")
         
         return {
             "success": True,

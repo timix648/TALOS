@@ -27,6 +27,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import Timeline from "@/components/timeline";
+import TalosAIChat from "@/components/talos-ai-chat";
 
 interface HealingRun {
   id: string;
@@ -43,7 +44,7 @@ interface WatchedRepo {
   total_heals?: number;
 }
 
-// Status badge with icons instead of emojis
+
 function StatusBadge({ status }: { status: HealingRun["status"] }) {
   const config = {
     running: {
@@ -79,7 +80,6 @@ function StatusBadge({ status }: { status: HealingRun["status"] }) {
   );
 }
 
-// Run card component
 function RunCard({ run, isActive, onClick }: { 
   run: HealingRun; 
   isActive: boolean;
@@ -134,7 +134,6 @@ function RunCard({ run, isActive, onClick }: {
   );
 }
 
-// Protected repo card
 function ProtectedRepoCard({ repo }: { repo: WatchedRepo }) {
   const statusConfig = {
     healthy: { icon: Shield, color: "text-emerald-400", bg: "bg-emerald-500/10" },
@@ -165,7 +164,6 @@ function ProtectedRepoCard({ repo }: { repo: WatchedRepo }) {
   );
 }
 
-// Healing pipeline visualization
 function HealingPipelineVisualization() {
   const stages = [
     { id: 1, name: "Detect", icon: AlertTriangle, description: "CI/CD failure detected via webhook" },
@@ -210,7 +208,6 @@ function HealingPipelineVisualization() {
   );
 }
 
-// Empty state with better design
 function EmptyState() {
   return (
     <motion.div
@@ -252,7 +249,6 @@ function EmptyState() {
   );
 }
 
-// Live indicator
 function LiveIndicator() {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full">
@@ -266,7 +262,6 @@ function LiveIndicator() {
   );
 }
 
-// Stats card
 function StatCard({ label, value, icon: Icon, color }: { 
   label: string; 
   value: string | number; 
@@ -297,7 +292,7 @@ export default function Dashboard() {
   const [runs, setRuns] = useState<HealingRun[]>([]);
   const [watchedRepos, setWatchedRepos] = useState<WatchedRepo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [retryAllowed, setRetryAllowed] = useState<string | null>(null); // repo that can retry
+  const [retryAllowed, setRetryAllowed] = useState<string | null>(null); 
   const [stats, setStats] = useState({
     total_heals: 0,
     successful_heals: 0,
@@ -305,12 +300,12 @@ export default function Dashboard() {
     avg_boot_time_ms: 0,
   });
   
-  // Use refs to avoid stale closures in polling
+
   const lastKnownRunIdRef = useRef<string | null>(null);
+  const locallyCompletedRunsRef = useRef<Set<string>>(new Set()); 
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-  // Fetch stats from backend
   const fetchStats = async () => {
     try {
       const res = await fetch(`${API_URL}/stats/`);
@@ -328,70 +323,119 @@ export default function Dashboard() {
     }
   };
 
-  // Allow TALOS to push another fix
+
   const handleAllowRetry = async () => {
     if (!activeRunId) return;
     
     try {
+      console.log("Requesting retry for run:", activeRunId);
       const response = await fetch(`${API_URL}/runs/${activeRunId}/allow-retry`, {
         method: 'POST',
       });
       
+      console.log("Retry response status:", response.status);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log("Retry allowed for:", data.repo);
         setRetryAllowed(data.repo);
-        // Clear after 30 seconds
-        setTimeout(() => setRetryAllowed(null), 30000);
+   
+        setTimeout(() => setRetryAllowed(null), 60000);
+     
+        alert(`TALOS can now retry fixing ${data.repo}.\n\nTo trigger a new fix:\n1. Push a new commit to the repo, OR\n2. Re-run the failed GitHub Action workflow`);
+      } else {
+        const errorText = await response.text();
+        console.error("Retry failed:", response.status, errorText);
+        alert(`Failed to allow retry: ${errorText}`);
       }
     } catch (error) {
       console.error("Failed to allow retry:", error);
+      alert(`Error: ${error}`);
     }
   };
 
-  // Fetch runs (separated for polling)
+  
   const fetchRuns = async (isInitial = false) => {
     try {
       const runsRes = await fetch(`${API_URL}/runs/`);
       if (runsRes.ok) {
         const runsData = await runsRes.json();
-        // Map API response to frontend interface
+   
         const newRuns: HealingRun[] = (runsData.runs || []).map((r: { 
           run_id: string; 
           repo_full_name: string; 
           status: string; 
           started_at: string;
           pr_url?: string;
-        }) => ({
-          id: r.run_id,
-          repo: r.repo_full_name,
-          status: r.status as "running" | "success" | "failure",
-          timestamp: r.started_at,
-          pr_url: r.pr_url,
-        }));
-        setRuns(newRuns);
+        }) => {
         
-        // Auto-select only for NEW running runs (live healing in progress)
+          const isLocallyCompleted = locallyCompletedRunsRef.current.has(r.run_id);
+          let finalStatus = r.status as "running" | "success" | "failure";
+     
+          if (isLocallyCompleted && r.status === "running") {
+            console.log(`[Dashboard] Ignoring stale 'running' status for locally completed run: ${r.run_id}`);
+          
+            return null; 
+          }
+          
+          return {
+            id: r.run_id,
+            repo: r.repo_full_name,
+            status: finalStatus,
+            timestamp: r.started_at,
+            pr_url: r.pr_url,
+          };
+        }).filter(Boolean) as HealingRun[];
+        
+        
+        setRuns(prevRuns => {
+          const merged = [...newRuns];
+        
+          for (const runId of locallyCompletedRunsRef.current) {
+            const existingInMerged = merged.find(r => r.id === runId);
+            if (!existingInMerged) {
+             
+              const prevRun = prevRuns.find(r => r.id === runId);
+              if (prevRun) {
+                merged.push(prevRun);
+              }
+            }
+          }
+          
+          merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          return merged;
+        });
+        
+        
         const runningRun = newRuns.find((r: HealingRun) => r.status === "running");
         
+        console.log(`[Dashboard] Polling: ${newRuns.length} runs, running: ${runningRun?.id || 'none'}, lastKnown: ${lastKnownRunIdRef.current}`);
+        
         if (runningRun && runningRun.id !== lastKnownRunIdRef.current) {
-          // New running run detected - auto-show it (live event)
-          console.log("🚨 New healing run detected:", runningRun.id);
+     
+          console.log("New healing run detected, switching to:", runningRun.id);
           setActiveRunId(runningRun.id);
           lastKnownRunIdRef.current = runningRun.id;
+         
+          const originalTitle = document.title;
+          document.title = "TALOS Healing in Progress!";
+          setTimeout(() => { document.title = originalTitle; }, 5000);
+        } else if (runningRun && runningRun.id === lastKnownRunIdRef.current) {
+       
         } else if (isInitial && newRuns[0]) {
-          // Initial load only - select latest run
+   
+          console.log("Initial load, selecting:", newRuns[0].id);
           setActiveRunId(newRuns[0].id);
           lastKnownRunIdRef.current = newRuns[0].id;
         }
-        // NOTE: Don't auto-switch for completed runs during polling
-        // User's manual selection should be preserved
+    
       }
     } catch (error) {
       console.error("Failed to fetch runs:", error);
     }
   };
 
-  // Fetch watched repos
+  
   const fetchWatchedRepos = async () => {
     try {
       const sessionRes = await fetch('/api/auth/session');
@@ -417,7 +461,6 @@ export default function Dashboard() {
     }
   };
 
-  // Initial data fetch
   useEffect(() => {
     const loadInitialData = async () => {
       setIsLoading(true);
@@ -426,33 +469,41 @@ export default function Dashboard() {
     };
     loadInitialData();
 
-    // Check URL for run_id parameter
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const urlRunId = params.get('run_id');
       if (urlRunId) setActiveRunId(urlRunId);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
-  // Poll for new runs every 5 seconds (real-time updates)
+  
   useEffect(() => {
     const pollInterval = setInterval(() => {
       fetchRuns(false);
-      fetchStats();  // Also refresh stats
-    }, 5000);
+    }, 2000);
+    
+    const statsInterval = setInterval(() => {
+      fetchStats();
+    }, 15000);
 
-    return () => clearInterval(pollInterval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // No dependencies - runs once on mount, uses refs for current values
+    return () => {
+      clearInterval(pollInterval);
+      clearInterval(statsInterval);
+    };
+  }, []); 
 
-  // Handle completion
   const handleComplete = (status: "success" | "failure") => {
     if (activeRunId) {
+      console.log(`[Dashboard] Run ${activeRunId} completed with status: ${status}`);
+      locallyCompletedRunsRef.current.add(activeRunId);
       setRuns(prev => prev.map(r => 
         r.id === activeRunId ? { ...r, status } : r
       ));
-      // Refresh stats when a run completes
+  
+      if (lastKnownRunIdRef.current === activeRunId) {
+        lastKnownRunIdRef.current = null;
+      }
       fetchStats();
     }
   };
@@ -461,18 +512,18 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      {/* Header */}
+    
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-gray-950/80 border-b border-gray-800/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Link href="/" className="flex items-center gap-3 group">
                 <motion.div 
-                  className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20"
+                  className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-cyan-500/20"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
-                  <Shield className="w-5 h-5 text-white" />
+                  <img src="/talos-logo.png" alt="TALOS" className="w-full h-full object-cover" />
                 </motion.div>
                 <div>
                   <span className="text-xl font-bold">TALOS</span>
@@ -496,7 +547,7 @@ export default function Dashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Stats Row */}
+       
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -529,9 +580,9 @@ export default function Dashboard() {
         </motion.div>
 
         <div className="grid lg:grid-cols-12 gap-6">
-          {/* Sidebar */}
+        
           <aside className="lg:col-span-3 space-y-6">
-            {/* Protected Repos */}
+          
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -570,7 +621,7 @@ export default function Dashboard() {
               )}
             </motion.div>
 
-            {/* Healing Runs */}
+          
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -613,7 +664,7 @@ export default function Dashboard() {
               )}
             </motion.div>
 
-            {/* Quick Actions */}
+          
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -654,14 +705,14 @@ export default function Dashboard() {
             </motion.div>
           </aside>
 
-          {/* Main Content */}
+         
           <main className="lg:col-span-9">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-gray-900/50 border border-gray-800 rounded-2xl overflow-hidden min-h-[600px]"
             >
-              {/* Terminal header */}
+             
               <div className="flex items-center justify-between px-4 py-3 bg-gray-900/80 border-b border-gray-800">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-red-500/80" />
@@ -671,8 +722,8 @@ export default function Dashboard() {
                 <span className="text-sm text-gray-400 font-mono">
                   {activeRunId ? `talos://run/${activeRunId.slice(0, 12)}` : "talos://neural-stream"}
                 </span>
-                {/* Allow Retry Button - shows when active run completed with success */}
-                {activeRunId && runs.find(r => r.id === activeRunId)?.status === "success" ? (
+               
+                {activeRunId && (runs.find(r => r.id === activeRunId)?.status === "success" || runs.find(r => r.id === activeRunId)?.status === "failure") ? (
                   retryAllowed ? (
                     <span className="text-xs text-emerald-400 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" />
@@ -692,7 +743,7 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Timeline */}
+           
               <div className="p-6">
                 {activeRunId ? (
                   <Timeline
@@ -708,6 +759,18 @@ export default function Dashboard() {
           </main>
         </div>
       </div>
+
+     
+      <TalosAIChat 
+        runs={runs.map(r => ({
+          run_id: r.id,
+          repo_full_name: r.repo,
+          status: r.status === "success" ? "completed" : r.status === "failure" ? "failed" : "running",
+          error_type: undefined,
+          patient_zero: undefined,
+        }))}
+        selectedRunId={activeRunId || undefined}
+      />
     </div>
   );
 }

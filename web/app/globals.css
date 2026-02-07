@@ -19,7 +19,7 @@ body {
   min-height: 100vh;
 }
 
-/* Custom scrollbar */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -39,18 +39,18 @@ body {
   background: rgb(75, 85, 99);
 }
 
-/* Selection */
+
 ::selection {
   background-color: rgba(6, 182, 212, 0.3);
   color: white;
 }
 
-/* Smooth scrolling */
+
 html {
   scroll-behavior: smooth;
 }
 
-/* Animation utilities */
+
 @keyframes pulse-glow {
   0%, 100% {
     box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
@@ -64,7 +64,7 @@ html {
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
-/* Gradient text */
+
 .text-gradient {
   background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 50%, #ec4899 100%);
   -webkit-background-clip: text;
@@ -72,14 +72,14 @@ html {
   background-clip: text;
 }
 
-/* Glass effect */
+
 .glass {
   background: rgba(17, 24, 39, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Line clamp utility */
+
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

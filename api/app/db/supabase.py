@@ -58,9 +58,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")  # Use service role key for backend
+SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")  
 
-# Lazy initialization
+
 _supabase: Optional[Client] = None
 
 
@@ -74,9 +74,6 @@ def get_supabase() -> Client:
     return _supabase
 
 
-# ============================================================================
-# DATA MODELS
-# ============================================================================
 
 @dataclass
 class Installation:
@@ -93,7 +90,7 @@ class WatchedRepo:
     installation_id: str
     repo_full_name: str
     auto_heal_enabled: bool = True
-    safe_mode: bool = True  # True = Create PR, False = Direct commit
+    safe_mode: bool = True  
     id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -104,11 +101,11 @@ class HealingRun:
     run_id: str
     repo_full_name: str
     installation_id: Optional[str] = None
-    status: str = "running"  # running, success, failure
+    status: str = "running"  
     error_type: Optional[str] = None
-    error_message: Optional[str] = None  # Full error message
-    patient_zero: Optional[str] = None   # The file that caused the bug
-    crash_site: Optional[str] = None     # Where the error manifested
+    error_message: Optional[str] = None  
+    patient_zero: Optional[str] = None   
+    crash_site: Optional[str] = None     
     pr_url: Optional[str] = None
     pr_number: Optional[int] = None
     branch_name: Optional[str] = None
@@ -117,10 +114,6 @@ class HealingRun:
     metadata: Optional[Dict[str, Any]] = None
     id: Optional[str] = None
 
-
-# ============================================================================
-# INSTALLATION OPERATIONS
-# ============================================================================
 
 async def upsert_installation(installation: Installation) -> Installation:
     """Create or update a GitHub App installation."""
@@ -156,7 +149,7 @@ async def get_installation(github_installation_id: int) -> Optional[Installation
             return Installation(**result.data[0])
         return None
     except Exception as e:
-        print(f"⚠️ get_installation error: {e}")
+        print(f"get_installation error: {e}")
         return None
 
 
@@ -171,16 +164,12 @@ async def delete_installation(github_installation_id: int) -> bool:
     return len(result.data) > 0
 
 
-# ============================================================================
-# WATCHED REPO OPERATIONS
-# ============================================================================
-
 async def add_watched_repo(repo: WatchedRepo) -> WatchedRepo:
     """Add a repo to watch list."""
     supabase = get_supabase()
     
     data = asdict(repo)
-    data.pop("id", None)  # Let DB generate ID
+    data.pop("id", None)  
     
     result = supabase.table("watched_repos").upsert(
         data,
@@ -235,10 +224,6 @@ async def remove_watched_repo(installation_id: str, repo_full_name: str) -> bool
     return len(result.data) > 0
 
 
-# ============================================================================
-# HEALING RUN OPERATIONS
-# ============================================================================
-
 async def create_healing_run(run: HealingRun) -> HealingRun:
     """Create a new healing run record."""
     supabase = get_supabase()
@@ -251,7 +236,6 @@ async def create_healing_run(run: HealingRun) -> HealingRun:
         "metadata": run.metadata or {},
     }
     
-    # Only include optional fields if they have values
     if run.installation_id:
         data["installation_id"] = run.installation_id
     if run.error_type:
@@ -263,13 +247,13 @@ async def create_healing_run(run: HealingRun) -> HealingRun:
         result = supabase.table("healing_runs").insert(data).execute()
         
         if result.data:
-            print(f"✅ DB: Created healing run {run.run_id}")
+            print(f"DB: Created healing run {run.run_id}")
             return HealingRun(**result.data[0])
         else:
-            print(f"⚠️ DB: No data returned when creating run {run.run_id}")
+            print(f"DB: No data returned when creating run {run.run_id}")
         return run
     except Exception as e:
-        print(f"❌ DB: Failed to create healing run: {e}")
+        print(f"DB: Failed to create healing run: {e}")
         raise
 
 
@@ -316,7 +300,7 @@ async def get_healing_run(run_id: str) -> Optional[HealingRun]:
             return HealingRun(**result.data[0])
         return None
     except Exception as e:
-        print(f"⚠️ get_healing_run error: {e}")
+        print(f"get_healing_run error: {e}")
         return None
 
 
@@ -368,9 +352,32 @@ async def get_run_stats(installation_id: Optional[str] = None) -> Dict[str, Any]
     return stats
 
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
+async def persist_healing_event(
+    run_id: str,
+    event_type: str,
+    title: str,
+    description: str = "",
+    metadata: dict = None
+) -> bool:
+    """Persist a healing event to Supabase for later retrieval by AI Chat."""
+    supabase = get_supabase()
+    
+    try:
+        data = {
+            "run_id": run_id,
+            "event_type": event_type,
+            "title": title,
+            "description": (description or "")[:5000], 
+            "metadata": metadata or {},
+        }
+        supabase.table("healing_events").insert(data).execute()
+        return True
+    except Exception as e:
+       
+        print(f"DB: Failed to persist event: {e}")
+        return False
+
+
 
 async def is_repo_watched(repo_full_name: str) -> bool:
     """Check if a repo is being watched by any installation."""
@@ -406,10 +413,6 @@ async def delete_healing_run(run_id: str) -> bool:
         print(f"Error deleting healing run: {e}")
         return False
 
-
-# ============================================================================
-# ALIAS FUNCTIONS (for route compatibility)
-# ============================================================================
 
 def get_supabase_client() -> Client:
     """Alias for get_supabase (for import compatibility)."""

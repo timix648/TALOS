@@ -8,7 +8,7 @@ export async function GET() {
       headers: {
         'Content-Type': 'application/json',
       },
-      // Revalidate every 30 seconds
+     
       next: { revalidate: 30 }
     });
     
@@ -19,7 +19,7 @@ export async function GET() {
     const stats = await response.json();
     return NextResponse.json(stats);
   } catch (error) {
-    // Return default values if backend is not running
+    
     return NextResponse.json({
       avg_boot_time_ms: 0,
       fix_rate_percent: 0,

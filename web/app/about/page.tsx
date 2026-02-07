@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function AboutPage() {
   return (
@@ -10,10 +11,13 @@ export default function AboutPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-gray-950/80 border-b border-gray-800/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
-              <span className="text-xl">🧬</span>
+            <div className="w-10 h-10 rounded-xl overflow-hidden">
+              <Image src="/talos-logo.png" alt="TALOS" width={40} height={40} className="w-full h-full object-cover" />
             </div>
             <span className="text-xl font-bold">TALOS</span>
+          </Link>
+          <Link href="/" className="text-gray-400 hover:text-white transition-colors text-sm">
+            Back to Home
           </Link>
         </div>
       </nav>
@@ -28,11 +32,11 @@ export default function AboutPage() {
           </h1>
           
           <p className="text-xl text-gray-300 mb-12">
-            The Self-Healing DevOps Species - An autonomous CI/CD repair agent powered by Gemini 3.
+            An autonomous CI/CD repair agent powered by Gemini 3.
           </p>
 
           <section className="space-y-12">
-            {/* What is TALOS */}
+
             <div>
               <h2 className="text-2xl font-bold mb-4 text-cyan-400">What is TALOS?</h2>
               <p className="text-gray-400 leading-relaxed">
@@ -42,27 +46,27 @@ export default function AboutPage() {
               </p>
             </div>
 
-            {/* How it Works */}
             <div>
               <h2 className="text-2xl font-bold mb-4 text-cyan-400">How It Works</h2>
               <div className="space-y-4">
                 {[
-                  { icon: "👁️", title: "Observe", desc: "TALOS monitors your GitHub repositories via webhooks. When a CI/CD workflow fails, it captures the error logs and context." },
-                  { icon: "🧠", title: "Reason", desc: "Using Gemini 3, TALOS analyzes stack traces, builds dependency graphs, and identifies the 'Patient Zero' file causing the failure." },
-                  { icon: "🔧", title: "Heal", desc: "TALOS generates fixes in an isolated E2B sandbox, runs your test suite to verify the fix works, then opens a Pull Request for review." },
-                ].map((step) => (
-                  <div key={step.title} className="flex gap-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
-                    <span className="text-2xl">{step.icon}</span>
+                  { step: "01", title: "Detect", desc: "TALOS monitors your GitHub repositories via webhooks. When a CI/CD workflow fails, it captures the error logs and full context." },
+                  { step: "02", title: "Analyze", desc: "Using Gemini 3, TALOS parses stack traces, builds dependency graphs, and identifies the root cause file responsible for the failure." },
+                  { step: "03", title: "Fix", desc: "TALOS generates fixes in an isolated E2B sandbox, runs your test suite to verify the fix works, then opens a Pull Request for review." },
+                  { step: "04", title: "Verify", desc: "Visual Cortex captures screenshots of the running application and uses AI vision to detect UI regressions before submitting the fix." },
+                ].map((item) => (
+                  <div key={item.title} className="flex gap-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
+                    <span className="text-2xl font-bold text-cyan-500/40 font-mono">{item.step}</span>
                     <div>
-                      <h3 className="font-bold text-white">{step.title}</h3>
-                      <p className="text-gray-400 text-sm">{step.desc}</p>
+                      <h3 className="font-bold text-white">{item.title}</h3>
+                      <p className="text-gray-400 text-sm">{item.desc}</p>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Tech Stack */}
+    
             <div>
               <h2 className="text-2xl font-bold mb-4 text-cyan-400">Tech Stack</h2>
               <div className="flex flex-wrap gap-3">
@@ -72,8 +76,8 @@ export default function AboutPage() {
                   "E2B Sandbox",
                   "Next.js 15",
                   "GitHub Apps",
-                  "Redis",
                   "Supabase",
+                  "Playwright",
                   "Python",
                   "TypeScript",
                 ].map((tech) => (
@@ -84,22 +88,12 @@ export default function AboutPage() {
               </div>
             </div>
 
-            {/* Hackathon */}
-            <div>
-              <h2 className="text-2xl font-bold mb-4 text-cyan-400">Vetrox Agentic 3.0 Hackathon</h2>
-              <p className="text-gray-400 leading-relaxed">
-                TALOS was built for the Vetrox Agentic 3.0 Hackathon, showcasing the power of AI agents 
-                in automating complex DevOps workflows. It demonstrates how LLMs can be integrated with 
-                real-world development tools to create autonomous systems that save developers time.
-              </p>
-            </div>
-
-            {/* Team */}
+           
             <div>
               <h2 className="text-2xl font-bold mb-4 text-cyan-400">Connect</h2>
               <div className="flex gap-4">
                 <a 
-                  href="https://github.com/talos-agent/talos" 
+                  href="https://github.com/timix648/TALOS" 
                   target="_blank"
                   className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg hover:border-gray-600 transition-colors"
                 >
@@ -107,7 +101,7 @@ export default function AboutPage() {
                   GitHub
                 </a>
                 <a 
-                  href="https://x.com/talos_agent" 
+                  href="https://x.com/0xGenZero" 
                   target="_blank"
                   className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg hover:border-gray-600 transition-colors"
                 >
@@ -115,7 +109,7 @@ export default function AboutPage() {
                   X (Twitter)
                 </a>
                 <a 
-                  href="https://t.me/talos_agent" 
+                  href="https://t.me/oxgenzero" 
                   target="_blank"
                   className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg hover:border-gray-600 transition-colors"
                 >
@@ -126,7 +120,7 @@ export default function AboutPage() {
             </div>
           </section>
 
-          {/* Back link */}
+         
           <div className="mt-16">
             <Link 
               href="/"

@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-/**
- * GitHub OAuth Login Initiator
- * =============================
- * Redirects user to GitHub to sign in and authorize TALOS.
- * This is the simple "Sign in with GitHub" flow.
- */
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
-// 1. Define the correct URL here. Fallback to localhost if the env var is missing.
+
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export async function GET(request: NextRequest) {
@@ -19,7 +13,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 2. Use APP_URL instead of request.nextUrl.origin to ensure consistency
   const callbackUrl = `${APP_URL}/api/auth/callback/github`;
   
   const scopes = "read:user user:email";

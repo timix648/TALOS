@@ -22,13 +22,10 @@ async def verify_github_signature(request: Request):
             detail="Missing X-Hub-Signature-256 header"
         )
     
-    # Get the raw body bytes (critical: do not parse as JSON yet)
     try:
         payload_body = await request.body()
     except ClientDisconnect:
-        # GitHub closed connection early - this happens occasionally
-        # Log it but don't crash the server
-        print("⚠️ Webhook: Client disconnected before body was read")
+        print("Webhook: Client disconnected before body was read")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Client disconnected"
@@ -40,7 +37,7 @@ async def verify_github_signature(request: Request):
             detail="Server Misconfiguration: GITHUB_WEBHOOK_SECRET not set"
         )
 
-    # Calculate the expected hash
+
     hash_object = hmac.new(
         key=WEBHOOK_SECRET.encode("utf-8"), 
         msg=payload_body, 
@@ -48,7 +45,7 @@ async def verify_github_signature(request: Request):
     )
     expected_signature = f"sha256={hash_object.hexdigest()}"
     
-    # Constant-time comparison to prevent timing attacks
+  
     if not hmac.compare_digest(expected_signature, signature_header):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
