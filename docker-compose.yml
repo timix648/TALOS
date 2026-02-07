@@ -1,6 +1,7 @@
 version: "3.9"
 
 services:
+  
   redis:
     image: redis:7-alpine
     container_name: talos-redis
@@ -41,25 +42,6 @@ services:
       timeout: 10s
       retries: 3
 
-  web:
-    build:
-      context: ./web
-      dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_APP_URL=http://localhost:3000
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
-        - NEXT_PUBLIC_GITHUB_APP_URL=https://github.com/apps/talos-healer/installations/new
-    container_name: talos-web
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
-    env_file:
-      - ./web/.env.local
-    depends_on:
-      - api
 
 volumes:
   redis_data:
